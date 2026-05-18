@@ -1,0 +1,22 @@
+{
+  "name": "multi-dashboard-saas-kit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Premium multi-tenant SaaS dashboard starter kit with React, Tailwind, Express, and PostgreSQL.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @saas-kit/backend",
+    "dev:backend": "npm run dev --workspace @saas-kit/backend",
+    "dev:frontend": "npm run dev --workspace @saas-kit/frontend",
+    "build": "npm run build --workspace @saas-kit/backend && npm run build --workspace @saas-kit/frontend",
+    "db:migrate": "npm run prisma:migrate --workspace @saas-kit/backend",
+    "db:seed": "npm run seed --workspace @saas-kit/backend"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

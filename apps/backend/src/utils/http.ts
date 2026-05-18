@@ -1,0 +1,31 @@
+export class HttpError extends Error {
+  statusCode: number;
+  details?: unknown;
+
+  constructor(statusCode: number, message: string, details?: unknown) {
+    super(message);
+    this.statusCode = statusCode;
+    this.details = details;
+  }
+}
+
+export const centsToCurrency = (cents: number) =>
+  Number((cents / 100).toFixed(2));
+
+export const pageArgs = (page?: unknown, pageSize?: unknown) => {
+  const parsedPage = Math.max(Number(page) || 1, 1);
+  const parsedSize = Math.min(Math.max(Number(pageSize) || 10, 1), 50);
+  return {
+    page: parsedPage,
+    pageSize: parsedSize,
+    skip: (parsedPage - 1) * parsedSize,
+    take: parsedSize
+  };
+};
+
+export const pagination = (page: number, pageSize: number, total: number) => ({
+  page,
+  pageSize,
+  total,
+  pageCount: Math.max(Math.ceil(total / pageSize), 1)
+});

@@ -1,0 +1,249 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MemberRole {
+  ADMIN
+  MEMBER
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+model Organization {
+  id           String               @id @default(cuid())
+  name         String
+  slug         String               @unique
+  plan         String               @default("Scale")
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  members      OrganizationMember[]
+  orders       Order[]
+  products     Product[]
+  inventory    InventoryItem[]
+  transactions Transaction[]
+  invoices     Invoice[]
+  tasks        Task[]
+  campaigns    Campaign[]
+  logs         SystemLog[]
+  contacts     Contact[]
+  leads        Lead[]
+  insights     Insight[]
+}
+
+model User {
+  id             String               @id @default(cuid())
+  email          String               @unique
+  name           String
+  passwordHash   String
+  avatarUrl      String?
+  status         UserStatus           @default(ACTIVE)
+  lastActiveAt   DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  memberships    OrganizationMember[]
+  refreshTokens  RefreshToken[]
+  assignedTasks  Task[]               @relation("TaskAssignee")
+}
+
+model OrganizationMember {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  role           MemberRole   @default(MEMBER)
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([organizationId, role])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Product {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  sku            String
+  category       String
+  priceCents     Int
+  status         String       @default("active")
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  orders         OrderItem[]
+  inventoryItem  InventoryItem?
+
+  @@unique([organizationId, sku])
+  @@index([organizationId, category])
+}
+
+model Order {
+  id             String       @id @default(cuid())
+  organizationId String
+  customerName   String
+  status         String
+  channel        String
+  totalCents     Int
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  items          OrderItem[]
+
+  @@index([organizationId, status, createdAt])
+}
+
+model OrderItem {
+  id          String  @id @default(cuid())
+  orderId     String
+  productId   String
+  quantity    Int
+  priceCents  Int
+  order       Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product     Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model InventoryItem {
+  id             String       @id @default(cuid())
+  organizationId String
+  productId      String       @unique
+  warehouse      String
+  stock          Int
+  reorderPoint   Int
+  supplier       String
+  updatedAt      DateTime     @updatedAt
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, stock])
+}
+
+model Transaction {
+  id             String       @id @default(cuid())
+  organizationId String
+  type           String
+  description    String
+  amountCents    Int
+  status         String
+  occurredAt     DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status, occurredAt])
+}
+
+model Invoice {
+  id             String       @id @default(cuid())
+  organizationId String
+  customerName   String
+  invoiceNumber  String
+  amountCents    Int
+  status         String
+  dueDate        DateTime
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, status])
+}
+
+model Task {
+  id             String       @id @default(cuid())
+  organizationId String
+  assigneeId     String?
+  title          String
+  project        String
+  priority       String
+  status         String
+  dueDate        DateTime
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignee       User?        @relation("TaskAssignee", fields: [assigneeId], references: [id])
+
+  @@index([organizationId, status, dueDate])
+}
+
+model Campaign {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  channel        String
+  spendCents     Int
+  clicks         Int
+  conversions    Int
+  revenueCents   Int
+  status         String
+  launchedAt     DateTime
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, channel, status])
+}
+
+model SystemLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  level          String
+  service        String
+  message        String
+  latencyMs      Int
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, level, createdAt])
+}
+
+model Contact {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  company        String
+  email          String
+  lifecycle      String
+  valueCents     Int
+  lastContacted  DateTime
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, lifecycle])
+}
+
+model Lead {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  company        String
+  source         String
+  stage          String
+  probability    Int
+  valueCents     Int
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, stage])
+}
+
+model Insight {
+  id             String       @id @default(cuid())
+  organizationId String
+  category       String
+  title          String
+  summary        String
+  impactScore    Int
+  confidence     Int
+  createdAt      DateTime     @default(now())
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, category, impactScore])
+}
