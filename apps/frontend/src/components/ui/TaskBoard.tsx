@@ -3,6 +3,7 @@ import { taskStatuses, taskStatusLabels, type TaskStatus, type ApiPagination } f
 import { api } from "../../lib/api";
 import { isDemo } from "../../lib/demo";
 import { loadReport } from "../../lib/report";
+import { cellText } from "../../lib/format";
 import { Button } from "./Button";
 
 type Row = Record<string, unknown>;
@@ -31,6 +32,7 @@ function TaskLane({ status, scope, search, onOpen }: BoardProps & { status: Task
       <span className="block text-xs text-zinc-500">{String(row.project)}</span>
       <strong className="my-1 block text-sm">{String(row.title)}</strong>
       <span className="block text-xs text-zinc-600 dark:text-zinc-400">{String(row.assignee)} · {String(row.priority)} priority</span>
+      {row.dueDate != null && <span className="mt-2 block text-xs text-zinc-600 dark:text-zinc-400">Due {cellText({key: "dueDate", label: "Due date", type: "date"}, row.dueDate)}</span>}
     </button>)}</div>
     {hasNextPage && <Button size="sm" variant="ghost" disabled={isFetchingNextPage} onClick={() => fetchNextPage()}>Load more tasks</Button>}
   </section>;

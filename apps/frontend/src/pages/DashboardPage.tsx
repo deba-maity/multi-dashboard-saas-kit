@@ -136,6 +136,7 @@ export function DashboardPage() {
     </nav>}
     {board ? <section aria-label="Task board" className="grid gap-3">
       <FormField type="search" label="Find tasks" value={search} onChange={(e) => change({ search: e.target.value }, true)} />
+      <SavedViews key={scope + dashboardId} scope={scope} dashboard={dashboardId} />
       <TaskBoard scope={scope} search={settledSearch} onOpen={setRow} />
     </section> : <>
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">{data.charts.map((chart) => {

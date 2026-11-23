@@ -137,3 +137,30 @@ test("reorder worksheet totals, warehouse selection and CSV agree", async ({ pag
   await dialog.getByLabel("Extra units per SKU").fill("0");
   await expect(dialog.getByRole("button", {name:"Download draft CSV"})).toBeDisabled();
 });
+
+test("a saved task board restores its layout and search from the report", async ({page}) => {
+  await page.goto("./#/dashboards/projects?layout=board");
+  await page.getByRole("searchbox", {name: "Find tasks"}).fill("review");
+  await page.getByRole("button", {name: "Save view", exact: true}).click();
+  await page.getByLabel("View name").fill("Review board");
+  await page.getByRole("button", {name: "Save report view"}).click();
+  await page.getByRole("button", {name: "Report", exact: true}).click();
+  await page.getByRole("button", {name: "Review board", exact: true}).click();
+  await expect(page.getByRole("region", {name: "Task board", exact: true})).toBeVisible();
+  await expect(page.getByRole("searchbox", {name: "Find tasks"})).toHaveValue("review");
+});
+
+test("the demo stays readable when browser storage is disabled", async ({page}) => {
+  await page.addInitScript(() => Object.defineProperty(window, "localStorage", {
+    get() { throw new DOMException("Storage disabled", "SecurityError"); }
+  }));
+  await page.goto("./#/dashboards/projects?layout=board");
+  const blocked = page.getByRole("region", {name: "Blocked tasks"});
+  await blocked.getByRole("button").first().click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("combobox").selectOption("done");
+  await dialog.getByRole("button", {name: "Save status"}).click();
+  await expect(dialog.getByRole("alert")).toContainText("Enable browser storage");
+  await page.keyboard.press("Escape");
+  await expect(blocked.getByRole("button").first()).toBeVisible();
+});

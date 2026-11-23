@@ -24,7 +24,8 @@ export function SavedViews({ dashboard, scope }: { dashboard: string; scope: str
   const { pathname } = useLocation();
   const toast = useToast();
   const view = new URLSearchParams(params);
-  view.set("view", "records");
+  if (view.get("layout") === "board") view.delete("view");
+  else view.set("view", "records");
   function write(list: View[]) {
     try { localStorage.setItem(key, JSON.stringify(list)); setViews(list); return true; }
     catch { toast.push({ title: "This browser could not save the view" }); return false; }

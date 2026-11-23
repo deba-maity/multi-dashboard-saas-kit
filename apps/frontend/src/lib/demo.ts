@@ -20,8 +20,10 @@ function snapshot(id: DashboardId, period?: string | null): Promise<DashboardRes
 const taskKey = (id: string) => "northstar.sample.task." + id;
 
 function savedStatus(id: string) {
-  const value = localStorage.getItem(taskKey(id));
-  return taskStatuses.find((status) => status === value);
+  try {
+    const value = localStorage.getItem(taskKey(id));
+    return taskStatuses.find((status) => status === value);
+  } catch { return undefined; }
 }
 
 export async function changeDemoTask(id: string, previousStatus: string, status: TaskStatus) {
@@ -30,8 +32,10 @@ export async function changeDemoTask(id: string, previousStatus: string, status:
   if (!task) throw new Error("Task no longer exists in this sample.");
   const current = savedStatus(id) ?? task.status;
   if (current !== previousStatus && current !== status) throw new Error("This task changed. Reopen it to see the current status.");
-  if (status === task.status) localStorage.removeItem(taskKey(id));
-  else localStorage.setItem(taskKey(id), status);
+  try {
+    if (status === task.status) localStorage.removeItem(taskKey(id));
+    else localStorage.setItem(taskKey(id), status);
+  } catch { throw new Error("Enable browser storage to save sample task changes."); }
 }
 
 export async function resetDemoTasks() {
