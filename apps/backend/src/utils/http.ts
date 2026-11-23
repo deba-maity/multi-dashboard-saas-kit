@@ -13,8 +13,8 @@ export const centsToCurrency = (cents: number) =>
   Number((cents / 100).toFixed(2));
 
 export const pageArgs = (page?: unknown, pageSize?: unknown) => {
-  const parsedPage = Math.max(Number(page) || 1, 1);
-  const parsedSize = Math.min(Math.max(Number(pageSize) || 10, 1), 50);
+  const parsedPage = Math.min(100000, Math.max(Math.floor(Number(page)) || 1, 1));
+  const parsedSize = Math.min(Math.max(Math.floor(Number(pageSize)) || 10, 1), 50);
   return {
     page: parsedPage,
     pageSize: parsedSize,

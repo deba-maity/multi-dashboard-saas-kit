@@ -58,7 +58,7 @@ authRouter.post("/register", validate(registerSchema), async (req, res, next) =>
     });
 
     const membership = user.memberships[0];
-    const refreshToken = signRefreshToken(user.id);
+    const refreshToken = signRefreshToken(user.id, membership.organizationId);
     await prisma.refreshToken.create({
       data: {
         userId: user.id,
@@ -92,10 +92,11 @@ authRouter.post("/login", validate(loginSchema), async (req, res, next) => {
       throw new HttpError(401, "Invalid credentials");
     }
 
+    if (user.status === "SUSPENDED") throw new HttpError(403, "Account is suspended");
     const membership = user.memberships[0];
     if (!membership) throw new HttpError(403, "No organization membership found");
 
-    const refreshToken = signRefreshToken(user.id);
+    const refreshToken = signRefreshToken(user.id, membership.organizationId);
     await prisma.$transaction([
       prisma.user.update({ where: { id: user.id }, data: { lastActiveAt: new Date() } }),
       prisma.refreshToken.create({
@@ -126,18 +127,25 @@ authRouter.post("/refresh", async (req, res, next) => {
   try {
     const refreshToken = req.body.refreshToken as string | undefined;
     if (!refreshToken) throw new HttpError(401, "Missing refresh token");
-    const payload = verifyRefreshToken(refreshToken);
+    let payload;
+    try { payload = verifyRefreshToken(refreshToken); }
+    catch { throw new HttpError(401, "Invalid or expired refresh token"); }
     const tokenRecord = await prisma.refreshToken.findUnique({
       where: { tokenHash: hashToken(refreshToken) },
-      include: { user: { include: { memberships: { take: 1 } } } }
+      include: { user: { include: { memberships: true } } }
     });
     if (!tokenRecord || tokenRecord.revokedAt || tokenRecord.expiresAt < new Date()) {
       throw new HttpError(401, "Invalid refresh token");
     }
     if (tokenRecord.userId !== payload.userId) throw new HttpError(401, "Invalid refresh token");
 
-    const membership = tokenRecord.user.memberships[0];
+    const memberships = tokenRecord.user.memberships;
+    const membership = payload.organizationId
+      ? memberships.find((item) => item.organizationId === payload.organizationId)
+      : memberships.length === 1 ? memberships[0] : undefined;
+    if (!membership || tokenRecord.user.status === "SUSPENDED") throw new HttpError(403, "Account access is unavailable");
     res.json({
+      role: membership.role,
       accessToken: signAccessToken({
         userId: tokenRecord.userId,
         organizationId: membership.organizationId,

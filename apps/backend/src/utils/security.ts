@@ -16,15 +16,15 @@ export const hashToken = (token: string) => crypto.createHash("sha256").update(t
 export const signAccessToken = (payload: AccessPayload) =>
   jwt.sign(payload, env.JWT_ACCESS_SECRET, { expiresIn: env.ACCESS_TOKEN_TTL as jwt.SignOptions["expiresIn"] });
 
-export const signRefreshToken = (userId: string) =>
+export const signRefreshToken = (userId: string, organizationId: string) =>
   jwt.sign(
-    { userId },
+    { userId, organizationId },
     env.JWT_REFRESH_SECRET,
-    { expiresIn: `${env.REFRESH_TOKEN_TTL_DAYS}d` as jwt.SignOptions["expiresIn"] }
+    { jwtid: crypto.randomUUID(), expiresIn: `${env.REFRESH_TOKEN_TTL_DAYS}d` as jwt.SignOptions["expiresIn"] }
   );
 
 export const verifyAccessToken = (token: string) =>
   jwt.verify(token, env.JWT_ACCESS_SECRET) as AccessPayload;
 
 export const verifyRefreshToken = (token: string) =>
-  jwt.verify(token, env.JWT_REFRESH_SECRET) as { userId: string };
+  jwt.verify(token, env.JWT_REFRESH_SECRET) as { userId: string; organizationId?: string };

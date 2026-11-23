@@ -1,6 +1,16 @@
 # Multi Dashboard SaaS Kit
 
-A production-oriented full-stack dashboard starter kit for multi-tenant SaaS products. It includes ten real-world dashboards, reusable React components, JWT authentication, RBAC, tenant-scoped APIs, PostgreSQL models, and realistic seed data.
+Northstar is a multi-tenant reporting workspace with ten dashboards, a React frontend, and an Express and PostgreSQL API.
+
+[Open the interactive demo](https://deba-maity.github.io/multi-dashboard-saas-kit/)
+
+**Try a two-minute walkthrough**
+
+1. In Analytics, select **30 days**. Compare booked revenue with the previous 30 complete UTC days, then use **View data** to see the numbers behind the chart.
+2. Open **Review blocked tasks**, choose a task, change its status to **In progress**, and save. The task leaves the blocked queue and the status totals update. **Reset sample tasks** restores the starting board.
+3. In Inventory, choose **Low** under the reorder chart. Save the view, copy the filtered link, or export the matching SKUs to CSV.
+
+GitHub Pages serves fictional snapshots and keeps task changes and saved views in the current browser. The full-stack app authenticates users and persists task status in PostgreSQL. Shared links preserve the report settings. They do not transfer browser-local task edits.
 
 ## Stack
 
@@ -11,7 +21,7 @@ A production-oriented full-stack dashboard starter kit for multi-tenant SaaS pro
 
 ## Dashboards
 
-- Analytics: KPIs, revenue trend, order volume, growth signals
+- Analytics: KPIs, revenue trend, order volume, period comparisons
 - E-commerce: orders, products, fulfillment status, channel revenue
 - User Management: members, roles, statuses, protected CRUD invitation flow
 - Finance / Billing: transaction ledger, invoice aging, payment status
@@ -20,14 +30,14 @@ A production-oriented full-stack dashboard starter kit for multi-tenant SaaS pro
 - Marketing: campaign ROI, clicks, conversions, channel comparison
 - System Monitoring: logs, service health, error and latency views
 - CRM: leads, contacts, deal pipeline, forecast widgets
-- AI / Insights: recommendations, predicted trends, confidence scoring
+- AI / Insights: recommendations, sample recommendation scores and a revenue scenario
 
 ## Quick Start
 
 1. Install dependencies:
 
    ```bash
-   npm install
+   npm ci
    ```
 
 2. Copy environment variables:
@@ -39,7 +49,7 @@ A production-oriented full-stack dashboard starter kit for multi-tenant SaaS pro
 
 3. Start PostgreSQL and create a database named `multi_dashboard_saas`.
 
-4. Run Prisma migration and seed demo data:
+4. Run the migration and seed a dedicated demo database. The seed replaces its existing application data.
 
    ```bash
    npm run db:migrate
@@ -66,6 +76,7 @@ A production-oriented full-stack dashboard starter kit for multi-tenant SaaS pro
 - `POST /api/auth/register`
 - `POST /api/auth/refresh`
 - `POST /api/auth/logout`
+- `PATCH /api/tasks/:id/status`
 - `GET /api/users`
 - `POST /api/users`
 - `PATCH /api/users/:id`
@@ -76,6 +87,14 @@ A production-oriented full-stack dashboard starter kit for multi-tenant SaaS pro
 - `GET /api/transactions`
 
 Every business endpoint is scoped to the authenticated user's organization. Admin-only mutations use the RBAC middleware.
+
+## Build and verify
+
+- `npm run build` generates the Prisma client and builds the API and frontend.
+- `npm test` checks reporting windows, totals, summaries, and pagination.
+- `npm run test:api` uses `TEST_DATABASE_URL` for a migrated PostgreSQL test database. It creates two temporary organizations and removes its fixtures afterward.
+- `npx playwright install chromium` installs the browser. `npm run test:demo` builds and previews the Pages site and exercises its main workflows.
+- `npm run build:demo` produces `apps/frontend/dist` using the checked-in sample snapshots. To regenerate them, point `DATABASE_URL` at the dedicated fictional seed database, set `PAGES_DEMO_SEED_DATABASE=1`, and run `npm run demo:export --workspace @saas-kit/backend`.
 
 ## Folder Structure
 
@@ -108,12 +127,3 @@ packages/
 - Add audit logs around admin mutations.
 - Wire the AI insights service to your ML or analytics backend when replacing the seeded mock scoring.
 - Add CI for `npm run build`, migrations, and API integration tests.
-
-## Personal notes for next run
-
-docker start multi-dashboard-postgres-55432
-npm run dev
-in another terminal npm run dev:frontend
-
-avery@northstar.test
-Password123!

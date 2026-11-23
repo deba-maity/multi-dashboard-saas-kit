@@ -8,3 +8,6 @@ coverage
 *.err
 *.tsbuildinfo
 apps/backend/prisma/dev.db
+
+/test-results/
+/playwright-report/

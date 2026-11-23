@@ -6,6 +6,8 @@ import { organizationsRouter } from "./organizations.js";
 import { transactionsRouter } from "./transactions.js";
 import { usersRouter } from "./users.js";
 
+import { tasksRouter } from "./tasks.js";
+
 export const router = Router();
 
 router.use("/auth", authRouter);
@@ -14,3 +16,5 @@ router.use("/organizations", organizationsRouter);
 router.use("/dashboard-data", dashboardRouter);
 router.use("/logs", logsRouter);
 router.use("/transactions", transactionsRouter);
+
+router.use("/tasks", tasksRouter);

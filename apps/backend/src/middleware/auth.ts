@@ -12,6 +12,7 @@ export const requireAuth = async (req: Request, _res: Response, next: NextFuncti
 
     const payload = verifyAccessToken(token);
     const membership = await prisma.organizationMember.findUnique({
+      select: { role: true, user: { select: { status: true } } },
       where: {
         organizationId_userId: {
           organizationId: payload.organizationId,
@@ -20,7 +21,7 @@ export const requireAuth = async (req: Request, _res: Response, next: NextFuncti
       }
     });
 
-    if (!membership) throw new HttpError(401, "Tenant membership not found");
+    if (!membership || membership.user.status === "SUSPENDED") throw new HttpError(401, "Tenant membership not found");
     req.auth = {
       userId: payload.userId,
       organizationId: payload.organizationId,

@@ -1,106 +1,80 @@
-import { useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, Search } from "lucide-react";
-import type { ApiPagination, TableColumn } from "@saas-kit/shared";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Download, Search } from "lucide-react";
+import { reportSearchFields, type DashboardResponse } from "@saas-kit/shared";
 import { Badge } from "./Badge";
 import { Button } from "./Button";
 import { Input } from "./Input";
-import { currency, date } from "../../lib/format";
+import { cellText, titleCase } from "../../lib/format";
 
-export function DataTable({
-  title,
-  columns,
-  rows,
-  pagination,
-  search,
-  onSearch,
-  onPageChange
-}: {
-  title: string;
-  columns: TableColumn[];
-  rows: Array<Record<string, unknown>>;
-  pagination: ApiPagination;
-  search: string;
-  onSearch: (value: string) => void;
-  onPageChange: (page: number) => void;
-}) {
-  const [sort, setSort] = useState<{ key: string; direction: "asc" | "desc" } | null>(null);
-  const sortedRows = useMemo(() => {
-    if (!sort) return rows;
-    return [...rows].sort((a, b) => {
-      const left = String(a[sort.key] ?? "");
-      const right = String(b[sort.key] ?? "");
-      return sort.direction === "asc" ? left.localeCompare(right) : right.localeCompare(left);
-    });
-  }, [rows, sort]);
+type Props = {
+  data: DashboardResponse;
+  actions: React.ReactNode;
+  params: URLSearchParams;
+  change: (values: Record<string, string>, replace?: boolean) => void;
+  onOpen: (row: Record<string, unknown>) => void;
+  onExport: () => void;
+  exporting: boolean;
+  fetching: boolean;
+};
 
-  const renderCell = (column: TableColumn, row: Record<string, unknown>) => {
-    const value = row[column.key];
-    if (column.type === "status") return <Badge value={value} />;
-    if (column.type === "currency") return currency(value);
-    if (column.type === "date") return date(value);
-    if (column.type === "percent") return `${value}%`;
-    return String(value ?? "");
-  };
-
+export function DataTable({ data, actions, params, change, onOpen, onExport, exporting, fetching }: Props) {
+  const { columns, rows, pagination, title } = data.table;
+  const search = params.get("search") ?? "";
+  const sort = params.get("sort");
+  const descending = params.get("direction") === "desc";
+  const hasFilters = !!search || data.filters.some(({ key }) => !!params.get(key));
+  function clear() {
+    const cleared: Record<string, string> = { search: "", page: "" };
+    for (const { key } of data.filters) cleared[key] = "";
+    change(cleared);
+  }
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex flex-col gap-3 border-b border-zinc-200 p-4 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="text-base font-semibold text-zinc-950 dark:text-white">{title}</h3>
-        <div className="relative w-full sm:w-72">
-          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
-          <Input className="pl-9" value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Search table" />
-        </div>
+    <section id="report-table" aria-label={title} className="min-w-0 scroll-mt-20 overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4 sm:p-5">
+        <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+        <Button variant="secondary" size="sm" disabled={exporting || fetching || !pagination.total} onClick={onExport}><Download size={14} />{exporting ? "Exporting…" : "Export CSV"}</Button>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-zinc-200 text-left dark:border-zinc-800">
-              {columns.map((column) => (
-                <th key={column.key} className="px-4 py-3 font-semibold text-zinc-500 dark:text-zinc-400">
-                  <button
-                    className="inline-flex items-center gap-1 hover:text-zinc-950 dark:hover:text-white"
-                    onClick={() =>
-                      setSort((current) => ({
-                        key: column.key,
-                        direction: current?.key === column.key && current.direction === "asc" ? "desc" : "asc"
-                      }))
-                    }
-                  >
-                    {column.label}
-                    {sort?.key === column.key ? sort.direction === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" /> : null}
-                  </button>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sortedRows.map((row, index) => (
-              <tr key={String(row.id ?? index)} className="border-b border-zinc-100 last:border-0 dark:border-zinc-900">
-                {columns.map((column) => (
-                  <td key={column.key} className="max-w-xs px-4 py-3 text-zinc-700 dark:text-zinc-300">
-                    <span className="line-clamp-2">{renderCell(column, row)}</span>
-                  </td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
+      <div className="flex flex-wrap items-end gap-3 border-y border-zinc-200 bg-zinc-50/60 p-4 dark:border-zinc-800 dark:bg-zinc-900/40">
+        <label className="grid min-w-0 flex-1 gap-1 text-xs font-semibold"><span>Search records</span>
+          <span className="relative"><Search className="pointer-events-none absolute left-3 top-3 text-zinc-400" size={15} />
+          <Input type="search" className="pl-9" value={search} placeholder={columns.filter((c) => reportSearchFields[data.id].includes(c.key)).map((c) => c.label).join(", ")} maxLength={150}
+            onChange={(e) => change({ search: e.target.value, page: "" }, true)} /></span>
+        </label>
+        {data.filters.map(({ key, label, options }) => <label key={key} className="grid gap-1 text-xs font-semibold"><span>{label}</span>
+          <select value={params.get(key) || "all"} onChange={(e) => change({ [key]: e.target.value === "all" ? "" : e.target.value, page: "" })}
+            className="h-10 rounded-md border border-zinc-200 bg-white px-2 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+            {options.map(({ value, label }) => <option key={value} value={value}>{value === "all" ? "All" : titleCase(label)}</option>)}
+          </select></label>)}
+        {hasFilters && <Button variant="ghost" size="sm" onClick={clear}>Clear filters</Button>}
+      </div>
+      <div className="border-b border-zinc-200 px-4 py-2 dark:border-zinc-800">{actions}</div>
+      <div role="region" aria-label={title + " rows"} tabIndex={0} aria-busy={fetching} className="overflow-x-auto">
+        <table className="w-full min-w-[620px] border-collapse text-left text-sm">
+          <thead><tr className="border-b border-zinc-200 dark:border-zinc-800">
+            {columns.map((column) => <th scope="col" key={column.key} aria-sort={sort === column.key ? descending ? "descending" : "ascending" : undefined}
+              className="whitespace-nowrap px-4 py-3 text-xs font-semibold text-zinc-600 dark:text-zinc-400">
+              {column.sortable === false ? column.label : <button className="inline-flex items-center gap-1" onClick={() =>
+                change({ sort: column.key, direction: sort === column.key && !descending ? "desc" : "asc", page: "" })}>{column.label}
+                {sort !== column.key ? <ArrowUpDown size={12} /> : descending ? <ArrowDown size={12} /> : <ArrowUp size={12} />}
+              </button>}
+            </th>)}
+          </tr></thead>
+          <tbody>{rows.map((row) => <tr key={String(row.id)} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50 dark:border-zinc-900 dark:hover:bg-zinc-900">
+            {columns.map((column, i) => <td key={column.key} className="max-w-xs px-4 py-3">
+              {i === 0 ? <button className="text-left font-semibold text-emerald-800 underline decoration-emerald-300 underline-offset-2 dark:text-emerald-300" onClick={() => onOpen(row)}>{cellText(column, row[column.key])}</button> :
+                column.type === "status" ? <Badge value={row[column.key]} /> : cellText(column, row[column.key])}
+            </td>)}
+          </tr>)}</tbody>
         </table>
       </div>
-      <div className="flex flex-col gap-3 border-t border-zinc-200 p-4 text-sm text-zinc-500 dark:border-zinc-800 sm:flex-row sm:items-center sm:justify-between">
-        <span>
-          Page {pagination.page} of {pagination.pageCount} · {pagination.total} records
-        </span>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" disabled={pagination.page <= 1} onClick={() => onPageChange(pagination.page - 1)}>
-            <ChevronLeft className="h-4 w-4" />
-            Prev
-          </Button>
-          <Button variant="secondary" size="sm" disabled={pagination.page >= pagination.pageCount} onClick={() => onPageChange(pagination.page + 1)}>
-            Next
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+      {rows.length === 0 && <div className="grid justify-items-center gap-2 py-8"><p className="font-semibold">No matching records</p>
+        {hasFilters && <Button variant="secondary" size="sm" onClick={clear}>Show all records</Button>}</div>}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 px-4 py-3 text-sm dark:border-zinc-800">
+        <span aria-live="polite">{pagination.total ? `${(pagination.page - 1) * pagination.pageSize + 1}–${Math.min(pagination.page * pagination.pageSize, pagination.total)} of ${pagination.total} records` : "0 records"}</span>
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" disabled={fetching || pagination.page <= 1} onClick={() => change({ page: String(pagination.page - 1) })}><ChevronLeft size={14} />Prev</Button>
+          <Button variant="secondary" size="sm" disabled={fetching || pagination.page >= pagination.pageCount} onClick={() => change({ page: String(pagination.page + 1) })}>Next<ChevronRight size={14} /></Button>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

@@ -1,3 +1,6 @@
+import type { Prisma } from "@prisma/client";
+import { analyticsWindow, orderSummary } from "./orderSummary.js";
+import { projectSummary } from "@saas-kit/shared";
 import { prisma } from "../config/prisma.js";
 import { centsToCurrency, pageArgs, pagination } from "../utils/http.js";
 
@@ -13,10 +16,9 @@ type DashboardId =
   | "crm"
   | "insights";
 
-type Query = Record<string, unknown>;
+const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(centsToCurrency(cents));
 
-const monthKey = (date: Date) =>
-  date.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+type Query = Record<string, unknown>;
 
 const sum = <T>(items: T[], pick: (item: T) => number) =>
   items.reduce((total, item) => total + pick(item), 0);
@@ -30,89 +32,88 @@ const statusFilter = (value?: unknown) =>
 const searchValue = (value?: unknown) =>
   typeof value === "string" && value.trim() ? value.trim() : undefined;
 
-const timeSeries = (items: Array<{ createdAt?: Date; occurredAt?: Date; launchedAt?: Date; totalCents?: number; amountCents?: number; revenueCents?: number }>) => {
-  const buckets = new Map<string, Record<string, string | number>>();
+function timeSeries(items: Array<{ date: Date; cents?: number; volume?: number }>) {
+  const buckets = new Map<string, { month: string; cents: number; volume: number }>();
   for (const item of items) {
-    const date = item.createdAt ?? item.occurredAt ?? item.launchedAt ?? new Date();
-    const key = monthKey(date);
-    const current = buckets.get(key) ?? { month: key, revenue: 0, volume: 0 };
-    current.revenue = Number(current.revenue) + centsToCurrency(item.totalCents ?? item.amountCents ?? item.revenueCents ?? 0);
-    current.volume = Number(current.volume) + 1;
-    buckets.set(key, current);
+    const key = item.date.toISOString().slice(0, 7);
+    const bucket = buckets.get(key) ?? {
+      month: item.date.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
+      cents: 0, volume: 0
+    };
+    bucket.cents += item.cents ?? 0;
+    bucket.volume += item.volume ?? 1;
+    buckets.set(key, bucket);
   }
-  return Array.from(buckets.values());
-};
+  return [...buckets.entries()].sort(([a], [b]) => a.localeCompare(b))
+    .map(([, bucket]) => ({ month: bucket.month, revenue: centsToCurrency(bucket.cents), volume: bucket.volume }));
+}
 
-const baseFilters = [
-  {
-    key: "status",
-    label: "Status",
-    options: [
-      { label: "All statuses", value: "all" },
-      { label: "Active", value: "active" },
-      { label: "Open", value: "open" },
-      { label: "Paid", value: "paid" }
-    ]
-  }
-];
+const orderFilters = [{
+  key: "status", label: "Order status",
+  options: ["all", "pending", "paid", "shipped", "refunded"].map((v) => ({ label: v, value: v }))
+}];
 
 export const getDashboardData = async (dashboard: DashboardId, organizationId: string, query: Query) => {
   const { page, pageSize, skip, take } = pageArgs(query.page, query.pageSize);
   const q = searchValue(query.search);
   const status = statusFilter(query.status);
 
+  const direction = query.direction === "desc" ? "desc" : "asc";
+  const match = { contains: q, mode: "insensitive" as const };
+  const orderWhere = {
+    organizationId, ...(status ? { status } : {}),
+    ...(q ? { OR: [{ customerName: match }, { channel: match }, { status: match }] } : {})
+  };
+  function tableOrder<T>(columns: Record<string, T>, fallback: T, tie: T): T[] {
+    const key = String(query.sort ?? "");
+    return [Object.hasOwn(columns, key) ? columns[key] : fallback, tie];
+  }
   switch (dashboard) {
     case "analytics": {
-      const orders = await prisma.order.findMany({ where: { organizationId }, orderBy: { createdAt: "asc" } });
-      const users = await prisma.organizationMember.count({ where: { organizationId } });
-      const total = await prisma.order.count({ where: { organizationId } });
-      const rows = await prisma.order.findMany({
-        where: {
-          organizationId,
-          ...(q ? { customerName: { contains: q, mode: "insensitive" as const } } : {})
-        },
-        orderBy: { createdAt: "desc" },
-        skip,
-        take
-      });
+      const window = analyticsWindow(query.period);
+      const filtered = { ...orderWhere, ...(window ? { createdAt: { gte: window.start, lt: window.end } } : {}) };
+      const [orders, total, rows] = await Promise.all([
+        prisma.order.findMany({
+          where: { organizationId, ...(window ? { createdAt: { gte: window.previousStart, lt: window.end } } : {}) },
+          select: { status: true, channel: true, totalCents: true, createdAt: true },
+          orderBy: { createdAt: "asc" }
+        }),
+        prisma.order.count({ where: filtered }),
+        prisma.order.findMany({ where: filtered, orderBy: tableOrder<Prisma.OrderOrderByWithRelationInput>({
+          customerName: { customerName: direction }, channel: { channel: direction }, status: { status: direction },
+          total: { totalCents: direction }, createdAt: { createdAt: direction }
+        }, { createdAt: "desc" }, { id: "asc" }), skip, take })
+      ]);
       return {
         id: dashboard,
-        title: "Analytics Command Center",
-        description: "Executive growth, revenue, and acquisition signals across the tenant.",
-        metrics: [
-          { label: "Revenue", value: centsToCurrency(sum(orders, (o) => o.totalCents)), change: 18.4, tone: "emerald" },
-          { label: "Active users", value: users, change: 9.8, tone: "sky" },
-          { label: "Growth rate", value: "24.7%", change: 4.2, tone: "violet" },
-          { label: "Avg order", value: centsToCurrency(Math.round(sum(orders, (o) => o.totalCents) / Math.max(orders.length, 1))), change: 6.1, tone: "amber" }
-        ],
-        charts: [
-          { name: "Revenue trend", type: "line", xKey: "month", yKeys: ["revenue"], data: timeSeries(orders) },
-          { name: "Order volume", type: "bar", xKey: "month", yKeys: ["volume"], data: timeSeries(orders) }
-        ],
+        title: "Revenue overview",
+        description: "Booked revenue includes paid and shipped orders. The order ledger includes every status.",
+        ...orderSummary(orders, window),
         table: {
-          title: "Recent revenue events",
+          title: "Order ledger",
           columns: [
             { key: "customerName", label: "Customer" },
             { key: "channel", label: "Channel" },
             { key: "status", label: "Status", type: "status" },
-            { key: "total", label: "Revenue", type: "currency" },
+            { key: "total", label: "Order total", type: "currency" },
             { key: "createdAt", label: "Date", type: "date" }
           ],
           rows: rows.map((o) => ({ ...o, total: centsToCurrency(o.totalCents) })),
           pagination: pagination(page, pageSize, total)
         },
-        filters: baseFilters,
-        widgets: [
-          { title: "North star", value: "Expansion MRR", detail: "Enterprise segment is lifting average contract value.", tone: "emerald" },
-          { title: "Watchlist", value: "Checkout drop", detail: "Mobile conversions softened this week.", tone: "amber" }
-        ]
+        filters: orderFilters
       };
     }
     case "ecommerce": {
-      const where = { organizationId, ...(status ? { status } : {}), ...(q ? { customerName: { contains: q, mode: "insensitive" as const } } : {}) };
+      const where = orderWhere;
       const [orders, rows, total, products] = await Promise.all([
         prisma.order.findMany({ where: { organizationId }, orderBy: { createdAt: "asc" } }),
-        prisma.order.findMany({ where, include: { items: true }, orderBy: { createdAt: "desc" }, skip, take }),
+        prisma.order.findMany({ where, include: { items: true }, orderBy: tableOrder<Prisma.OrderOrderByWithRelationInput>({
+          customerName: { customerName: direction },
+          channel: { channel: direction },
+          status: { status: direction },
+          total: { totalCents: direction }
+        }, { createdAt: "desc" }, { id: "asc" }), skip, take }),
         prisma.order.count({ where }),
         prisma.product.count({ where: { organizationId } })
       ]);
@@ -121,13 +122,13 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         title: "E-commerce Operations",
         description: "Orders, revenue, channels, and fulfillment status for commerce teams.",
         metrics: [
-          { label: "Gross sales", value: centsToCurrency(sum(orders, (o) => o.totalCents)), change: 12.1, tone: "emerald" },
-          { label: "Orders", value: orders.length, change: 7.5, tone: "sky" },
-          { label: "Products", value: products, change: 3.2, tone: "violet" },
-          { label: "Pending", value: orders.filter((o) => o.status === "pending").length, change: -2.4, tone: "amber" }
+          { label: "Gross order value", value: centsToCurrency(sum(orders, (o) => o.totalCents)), format: "currency", tone: "emerald" },
+          { label: "Orders", value: orders.length, tone: "sky" },
+          { label: "Products", value: products, tone: "violet" },
+          { label: "Pending", value: orders.filter((o) => o.status === "pending").length, tone: "amber" }
         ],
         charts: [
-          { name: "Sales by month", type: "area", xKey: "month", yKeys: ["revenue"], data: timeSeries(orders) },
+          { name: "Sales by month", unit: "USD", type: "area", xKey: "month", yKeys: ["revenue"], data: timeSeries(orders.map((o) => ({ date: o.createdAt, cents: o.totalCents }))) },
           { name: "Orders by channel", type: "bar", xKey: "channel", yKeys: ["orders"], data: ["Web", "Retail", "Marketplace"].map((channel) => ({ channel, orders: orders.filter((o) => o.channel === channel).length })) }
         ],
         table: {
@@ -135,31 +136,37 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           columns: [
             { key: "customerName", label: "Customer" },
             { key: "channel", label: "Channel" },
-            { key: "items", label: "Items", type: "number" },
+            { key: "items", label: "Units", sortable: false, type: "number" },
             { key: "status", label: "Status", type: "status" },
             { key: "total", label: "Total", type: "currency" }
           ],
-          rows: rows.map((o) => ({ id: o.id, customerName: o.customerName, channel: o.channel, items: o.items.length, status: o.status, total: centsToCurrency(o.totalCents) })),
+          rows: rows.map((o) => ({ id: o.id, customerName: o.customerName, channel: o.channel, items: sum(o.items, (item) => item.quantity), status: o.status, total: centsToCurrency(o.totalCents) })),
           pagination: pagination(page, pageSize, total)
         },
-        filters: [
-          { key: "status", label: "Order status", options: ["all", "pending", "paid", "shipped", "refunded"].map((v) => ({ label: v, value: v })) }
-        ],
+        filters: orderFilters,
         widgets: [
-          { title: "Fulfillment SLA", value: "96.2%", detail: "Same-day pick rate across warehouses.", tone: "emerald" },
-          { title: "Refund pressure", value: "2.1%", detail: "Below the 30-day benchmark.", tone: "sky" }
+          { title: "Awaiting payment", value: String(orders.filter((o) => o.status === "pending").length), detail: "Orders with payment pending." },
+          { title: "Refund rate", value: percent(orders.filter((o) => o.status === "refunded").length, orders.length) + "%", detail: "Refunded orders as a share of all orders." }
         ]
       };
     }
     case "users": {
       const where = {
         organizationId,
-        ...(status ? { user: { status: status.toUpperCase() as "ACTIVE" | "INVITED" | "SUSPENDED" } } : {}),
-        ...(q ? { user: { name: { contains: q, mode: "insensitive" as const } } } : {})
+        user: {
+          ...(["active", "invited", "suspended"].includes(status ?? "") ? { status: status!.toUpperCase() as "ACTIVE" | "INVITED" | "SUSPENDED" } : {}),
+          ...(q ? { OR: [{ name: match }, { email: match }] } : {})
+        }
       };
       const [members, rows, total] = await Promise.all([
         prisma.organizationMember.findMany({ where: { organizationId }, include: { user: true } }),
-        prisma.organizationMember.findMany({ where, include: { user: true }, orderBy: { createdAt: "desc" }, skip, take }),
+        prisma.organizationMember.findMany({ where, include: { user: true }, orderBy: tableOrder<Prisma.OrganizationMemberOrderByWithRelationInput>({
+          name: { user: { name: direction } },
+          email: { user: { email: direction } },
+          role: { role: direction },
+          status: { user: { status: direction } },
+          lastActiveAt: { user: { lastActiveAt: direction } }
+        }, { createdAt: "desc" }, { id: "asc" }), skip, take }),
         prisma.organizationMember.count({ where })
       ]);
       return {
@@ -167,14 +174,14 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         title: "User Management",
         description: "Members, role assignments, access status, and account activity.",
         metrics: [
-          { label: "Members", value: members.length, change: 8.8, tone: "sky" },
-          { label: "Admins", value: members.filter((m) => m.role === "ADMIN").length, change: 0, tone: "violet" },
-          { label: "Active", value: members.filter((m) => m.user.status === "ACTIVE").length, change: 6.2, tone: "emerald" },
-          { label: "Invited", value: members.filter((m) => m.user.status === "INVITED").length, change: -1.1, tone: "amber" }
+          { label: "Members", value: members.length, tone: "sky" },
+          { label: "Admins", value: members.filter((m) => m.role === "ADMIN").length, tone: "violet" },
+          { label: "Active", value: members.filter((m) => m.user.status === "ACTIVE").length, tone: "emerald" },
+          { label: "Invited", value: members.filter((m) => m.user.status === "INVITED").length, tone: "amber" }
         ],
         charts: [
           { name: "Role mix", type: "bar", xKey: "role", yKeys: ["members"], data: ["ADMIN", "MEMBER"].map((role) => ({ role, members: members.filter((m) => m.role === role).length })) },
-          { name: "Activity status", type: "pie", xKey: "status", yKeys: ["count"], data: ["ACTIVE", "INVITED", "SUSPENDED"].map((s) => ({ status: s, count: members.filter((m) => m.user.status === s).length })) }
+          { name: "Activity status", filterKey: "status", type: "pie", xKey: "status", yKeys: ["count"], data: ["ACTIVE", "INVITED", "SUSPENDED"].map((s) => ({ status: s, count: members.filter((m) => m.user.status === s).length })) }
         ],
         table: {
           title: "Team directory",
@@ -192,16 +199,22 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           { key: "status", label: "Account status", options: ["all", "active", "invited", "suspended"].map((v) => ({ label: v, value: v })) }
         ],
         widgets: [
-          { title: "Security", value: "RBAC enforced", detail: "Admin-only mutations are protected by middleware.", tone: "emerald" },
-          { title: "Lifecycle", value: "3 invites", detail: "Pending seats can be activated from CRUD actions.", tone: "amber" }
+          { title: "Access", value: String(members.filter((m) => m.role === "ADMIN").length) + " admins", detail: "Administrators can add members and update task status." },
+          { title: "Pending invitations", value: String(members.filter((m) => m.user.status === "INVITED").length), detail: "Members whose account status is invited." }
         ]
       };
     }
     case "finance": {
-      const where = { organizationId, ...(status ? { status } : {}), ...(q ? { description: { contains: q, mode: "insensitive" as const } } : {}) };
+      const where = { organizationId, ...(status ? { status } : {}), ...(q ? { OR: [{ description: match }, { type: match }, { status: match }] } : {}) };
       const [transactions, rows, total, invoices] = await Promise.all([
         prisma.transaction.findMany({ where: { organizationId }, orderBy: { occurredAt: "asc" } }),
-        prisma.transaction.findMany({ where, orderBy: { occurredAt: "desc" }, skip, take }),
+        prisma.transaction.findMany({ where, orderBy: tableOrder<Prisma.TransactionOrderByWithRelationInput>({
+          description: { description: direction },
+          type: { type: direction },
+          status: { status: direction },
+          amount: { amountCents: direction },
+          occurredAt: { occurredAt: direction }
+        }, { occurredAt: "desc" }, { id: "asc" }), skip, take }),
         prisma.transaction.count({ where }),
         prisma.invoice.findMany({ where: { organizationId } })
       ]);
@@ -210,13 +223,13 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         title: "Finance & Billing",
         description: "Payment history, invoice aging, recurring revenue, and collection state.",
         metrics: [
-          { label: "Net cashflow", value: centsToCurrency(sum(transactions, (t) => t.amountCents)), change: 14.9, tone: "emerald" },
-          { label: "Paid invoices", value: invoices.filter((i) => i.status === "paid").length, change: 5.3, tone: "sky" },
-          { label: "Overdue", value: invoices.filter((i) => i.status === "overdue").length, change: -6.7, tone: "rose" },
-          { label: "Pending payout", value: centsToCurrency(sum(transactions.filter((t) => t.status === "pending"), (t) => t.amountCents)), change: 2.2, tone: "amber" }
+          { label: "Settled cashflow", value: centsToCurrency(sum(transactions.filter((t) => t.status === "paid"), (t) => t.amountCents)), format: "currency", tone: "emerald" },
+          { label: "Paid invoices", value: invoices.filter((i) => i.status === "paid").length, tone: "sky" },
+          { label: "Overdue", value: invoices.filter((i) => i.status === "overdue").length, tone: "rose" },
+          { label: "Pending amount", value: centsToCurrency(sum(transactions.filter((t) => t.status === "pending"), (t) => t.amountCents)), format: "currency", tone: "amber" }
         ],
         charts: [
-          { name: "Cashflow", type: "line", xKey: "month", yKeys: ["revenue"], data: timeSeries(transactions.map((t) => ({ occurredAt: t.occurredAt, amountCents: t.amountCents }))) },
+          { name: "Settled cashflow", unit: "USD", type: "line", xKey: "month", yKeys: ["revenue"], data: timeSeries(transactions.filter((t) => t.status === "paid").map((t) => ({ date: t.occurredAt, cents: t.amountCents }))) },
           { name: "Invoice aging", type: "bar", xKey: "status", yKeys: ["count"], data: ["paid", "open", "overdue"].map((s) => ({ status: s, count: invoices.filter((i) => i.status === s).length })) }
         ],
         table: {
@@ -235,19 +248,27 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           { key: "status", label: "Payment status", options: ["all", "paid", "open", "pending", "failed"].map((v) => ({ label: v, value: v })) }
         ],
         widgets: [
-          { title: "Dunning", value: "Automated", detail: "Overdue invoices are tagged for follow-up.", tone: "violet" },
-          { title: "Runway signal", value: "Healthy", detail: "Collections outpace recurring expenses.", tone: "emerald" }
+          { title: "Unpaid invoices", value: String(invoices.filter((i) => i.status !== "paid").length), detail: "Open and overdue invoices." },
+          { title: "Failed payments", value: String(transactions.filter((t) => t.status === "failed").length), detail: "Failed transactions in the ledger." }
         ]
       };
     }
     case "inventory": {
+      const reorderPoint = prisma.inventoryItem.fields.reorderPoint;
+      const stock = status === "low" ? { lte: reorderPoint } : status === "healthy" ? { gt: reorderPoint } : undefined;
       const where = {
-        organizationId,
-        ...(q ? { product: { name: { contains: q, mode: "insensitive" as const } } } : {})
+        organizationId, stock,
+        ...(q ? { OR: [{ product: { name: match } }, { product: { sku: match } }, { warehouse: match }] } : {})
       };
       const [items, rows, total] = await Promise.all([
         prisma.inventoryItem.findMany({ where: { organizationId }, include: { product: true } }),
-        prisma.inventoryItem.findMany({ where, include: { product: true }, orderBy: { stock: "asc" }, skip, take }),
+        prisma.inventoryItem.findMany({ where, include: { product: true }, orderBy: tableOrder<Prisma.InventoryItemOrderByWithRelationInput>({
+          product: { product: { name: direction } },
+          sku: { product: { sku: direction } },
+          warehouse: { warehouse: direction },
+          stock: { stock: direction },
+          reorderPoint: { reorderPoint: direction }
+        }, { stock: "asc" }, { id: "asc" }), skip, take }),
         prisma.inventoryItem.count({ where })
       ]);
       const low = items.filter((i) => i.stock <= i.reorderPoint);
@@ -256,14 +277,14 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         title: "Inventory Control",
         description: "Stock health, product movement, supplier exposure, and reorder alerts.",
         metrics: [
-          { label: "SKUs tracked", value: items.length, change: 4.4, tone: "sky" },
-          { label: "Units on hand", value: sum(items, (i) => i.stock), change: -3.1, tone: "violet" },
-          { label: "Low stock", value: low.length, change: 9.5, tone: "rose" },
-          { label: "Avg cover", value: `${Math.round(sum(items, (i) => i.stock) / Math.max(items.length, 1))} units`, change: 1.2, tone: "amber" }
+          { label: "SKUs tracked", value: items.length, tone: "sky" },
+          { label: "Units on hand", value: sum(items, (i) => i.stock), tone: "violet" },
+          { label: "Low stock", value: low.length, tone: "rose" },
+          { label: "Avg stock per SKU", value: `${Math.round(sum(items, (i) => i.stock) / Math.max(items.length, 1))} units`, tone: "amber" }
         ],
         charts: [
           { name: "Stock by warehouse", type: "bar", xKey: "warehouse", yKeys: ["stock"], data: ["East Hub", "West Hub", "EU 3PL"].map((warehouse) => ({ warehouse, stock: sum(items.filter((i) => i.warehouse === warehouse), (i) => i.stock) })) },
-          { name: "Reorder risk", type: "bar", xKey: "risk", yKeys: ["count"], data: [{ risk: "Low", count: low.length }, { risk: "Healthy", count: items.length - low.length }] }
+          { name: "Reorder risk", filterKey: "status", type: "bar", xKey: "status", yKeys: ["count"], data: [{ status: "Low", count: low.length }, { status: "Healthy", count: items.length - low.length }] }
         ],
         table: {
           title: "Stock ledger",
@@ -272,39 +293,38 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
             { key: "sku", label: "SKU" },
             { key: "warehouse", label: "Warehouse" },
             { key: "stock", label: "Stock", type: "number" },
-            { key: "reorderPoint", label: "Reorder at", type: "number" }
+            { key: "reorderPoint", label: "Reorder at", type: "number" },
+            { key: "status", label: "Stock health", type: "status", sortable: false }
           ],
           rows: rows.map((i) => ({ id: i.id, product: i.product.name, sku: i.product.sku, warehouse: i.warehouse, stock: i.stock, reorderPoint: i.reorderPoint, status: i.stock <= i.reorderPoint ? "low" : "healthy" })),
           pagination: pagination(page, pageSize, total)
         },
-        filters: [],
+        filters: [{ key: "status", label: "Stock health", options: [{ label: "All", value: "all" }, { label: "Low", value: "low" }, { label: "Healthy", value: "healthy" }] }],
         widgets: [
-          { title: "Immediate action", value: `${low.length} SKUs`, detail: "Below reorder point and ready for supplier PO.", tone: "rose" },
-          { title: "Supplier concentration", value: "Balanced", detail: "No supplier exceeds 36% of tracked stock.", tone: "emerald" }
+          { title: "Reorder list", value: low.length + " SKUs", detail: low.map((i) => i.product.sku).join(", ") || "All stocked above reorder point." },
+          { title: "Suppliers", value: String(new Set(items.map((i) => i.supplier)).size), detail: "Distinct suppliers in the stock ledger." }
         ]
       };
     }
     case "projects": {
-      const where = { organizationId, ...(status ? { status } : {}), ...(q ? { title: { contains: q, mode: "insensitive" as const } } : {}) };
+      const where = { organizationId, ...(status ? { status } : {}), ...(q ? { OR: [{ title: match }, { project: match }, { assignee: { name: match } }] } : {}) };
       const [tasks, rows, total] = await Promise.all([
         prisma.task.findMany({ where: { organizationId }, include: { assignee: true } }),
-        prisma.task.findMany({ where, include: { assignee: true }, orderBy: { dueDate: "asc" }, skip, take }),
+        prisma.task.findMany({ where, include: { assignee: true }, orderBy: tableOrder<Prisma.TaskOrderByWithRelationInput>({
+          title: { title: direction },
+          project: { project: direction },
+          assignee: { assignee: { name: direction } },
+          priority: { priority: direction },
+          status: { status: direction },
+          dueDate: { dueDate: direction }
+        }, { dueDate: "asc" }, { id: "asc" }), skip, take }),
         prisma.task.count({ where })
       ]);
       return {
         id: dashboard,
         title: "Project Delivery",
         description: "Task throughput, ownership, delivery risk, and sprint execution.",
-        metrics: [
-          { label: "Tasks", value: tasks.length, change: 11.2, tone: "sky" },
-          { label: "Done", value: tasks.filter((t) => t.status === "done").length, change: 17.3, tone: "emerald" },
-          { label: "In progress", value: tasks.filter((t) => t.status === "in-progress").length, change: 5.4, tone: "violet" },
-          { label: "Blocked", value: tasks.filter((t) => t.status === "blocked").length, change: -2.6, tone: "rose" }
-        ],
-        charts: [
-          { name: "Kanban status", type: "bar", xKey: "status", yKeys: ["tasks"], data: ["todo", "in-progress", "done", "blocked"].map((s) => ({ status: s, tasks: tasks.filter((t) => t.status === s).length })) },
-          { name: "Priority mix", type: "pie", xKey: "priority", yKeys: ["count"], data: ["high", "medium", "low"].map((priority) => ({ priority, count: tasks.filter((t) => t.priority === priority).length })) }
-        ],
+        ...projectSummary(tasks),
         table: {
           title: "Delivery board",
           columns: [
@@ -312,26 +332,28 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
             { key: "project", label: "Project" },
             { key: "assignee", label: "Assignee" },
             { key: "priority", label: "Priority", type: "status" },
-            { key: "status", label: "Status", type: "status" }
+            { key: "status", label: "Status", type: "status" },
+            { key: "dueDate", label: "Due", type: "date" }
           ],
           rows: rows.map((t) => ({ id: t.id, title: t.title, project: t.project, assignee: t.assignee?.name ?? "Unassigned", priority: t.priority, status: t.status, dueDate: t.dueDate })),
           pagination: pagination(page, pageSize, total)
         },
         filters: [
           { key: "status", label: "Task status", options: ["all", "todo", "in-progress", "done", "blocked"].map((v) => ({ label: v, value: v })) }
-        ],
-        widgets: [
-          { title: "Sprint health", value: "On track", detail: "Done rate is ahead of the current sprint midpoint.", tone: "emerald" },
-          { title: "Capacity", value: "2 hot spots", detail: "High priority work is concentrated in platform.", tone: "amber" }
         ]
       };
     }
     case "marketing": {
       const channel = statusFilter(query.channel);
-      const where = { organizationId, ...(channel ? { channel } : {}), ...(q ? { name: { contains: q, mode: "insensitive" as const } } : {}) };
+      const where = { organizationId, ...(channel ? { channel } : {}), ...(q ? { OR: [{ name: match }, { channel: match }] } : {}) };
       const [campaigns, rows, total] = await Promise.all([
         prisma.campaign.findMany({ where: { organizationId } }),
-        prisma.campaign.findMany({ where, orderBy: { launchedAt: "desc" }, skip, take }),
+        prisma.campaign.findMany({ where, orderBy: tableOrder<Prisma.CampaignOrderByWithRelationInput>({
+          name: { name: direction },
+          channel: { channel: direction },
+          clicks: { clicks: direction },
+          conversions: { conversions: direction }
+        }, { launchedAt: "desc" }, { id: "asc" }), skip, take }),
         prisma.campaign.count({ where })
       ]);
       return {
@@ -339,14 +361,14 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         title: "Marketing Performance",
         description: "Campaign ROI, channel mix, conversion quality, and funnel efficiency.",
         metrics: [
-          { label: "Spend", value: centsToCurrency(sum(campaigns, (c) => c.spendCents)), change: 8.1, tone: "amber" },
-          { label: "Revenue", value: centsToCurrency(sum(campaigns, (c) => c.revenueCents)), change: 22.5, tone: "emerald" },
-          { label: "Clicks", value: sum(campaigns, (c) => c.clicks), change: 13.7, tone: "sky" },
-          { label: "CVR", value: `${percent(sum(campaigns, (c) => c.conversions), sum(campaigns, (c) => c.clicks))}%`, change: 3.9, tone: "violet" }
+          { label: "Spend", value: centsToCurrency(sum(campaigns, (c) => c.spendCents)), format: "currency", tone: "amber" },
+          { label: "Revenue", value: centsToCurrency(sum(campaigns, (c) => c.revenueCents)), format: "currency", tone: "emerald" },
+          { label: "Clicks", value: sum(campaigns, (c) => c.clicks), tone: "sky" },
+          { label: "CVR", value: `${percent(sum(campaigns, (c) => c.conversions), sum(campaigns, (c) => c.clicks))}%`, tone: "violet" }
         ],
         charts: [
-          { name: "Revenue by channel", type: "bar", xKey: "channel", yKeys: ["revenue"], data: ["Search", "Social", "Email", "Partner"].map((c) => ({ channel: c, revenue: centsToCurrency(sum(campaigns.filter((x) => x.channel === c), (x) => x.revenueCents)) })) },
-          { name: "Click trend", type: "line", xKey: "month", yKeys: ["volume"], data: timeSeries(campaigns.map((c) => ({ launchedAt: c.launchedAt, revenueCents: c.revenueCents }))) }
+          { name: "Revenue by channel", unit: "USD", filterKey: "channel", type: "bar", xKey: "channel", yKeys: ["revenue"], data: ["Search", "Social", "Email", "Partner"].map((c) => ({ channel: c, revenue: centsToCurrency(sum(campaigns.filter((x) => x.channel === c), (x) => x.revenueCents)) })) },
+          { name: "Clicks by launch month", type: "line", xKey: "month", yKeys: ["clicks"], data: timeSeries(campaigns.map((c) => ({ date: c.launchedAt, volume: c.clicks }))).map((row) => ({ month: row.month, clicks: row.volume })) }
         ],
         table: {
           title: "Campaign scorecard",
@@ -355,7 +377,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
             { key: "channel", label: "Channel" },
             { key: "clicks", label: "Clicks", type: "number" },
             { key: "conversions", label: "Conversions", type: "number" },
-            { key: "roi", label: "ROI", type: "percent" }
+            { key: "roi", label: "ROI", sortable: false, type: "percent" }
           ],
           rows: rows.map((c) => ({ id: c.id, name: c.name, channel: c.channel, clicks: c.clicks, conversions: c.conversions, roi: percent(c.revenueCents - c.spendCents, c.spendCents) })),
           pagination: pagination(page, pageSize, total)
@@ -364,41 +386,49 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           { key: "channel", label: "Channel", options: ["all", "Search", "Social", "Email", "Partner"].map((v) => ({ label: v, value: v })) }
         ],
         widgets: [
-          { title: "Best channel", value: "Email", detail: "Highest conversion rate with lower acquisition cost.", tone: "emerald" },
-          { title: "Budget shift", value: "+12% Search", detail: "Search is outperforming partner campaigns.", tone: "sky" }
+          { title: "Total conversions", value: String(sum(campaigns, (c) => c.conversions)), detail: "Conversions reported by all campaigns." },
+          { title: "Campaigns", value: String(campaigns.length), detail: "Campaigns included in the scorecard." }
         ]
       };
     }
     case "monitoring": {
       const level = statusFilter(query.level ?? query.status);
-      const where = { organizationId, ...(level ? { level } : {}), ...(q ? { message: { contains: q, mode: "insensitive" as const } } : {}) };
+      const where = { organizationId, ...(level ? { level } : {}), ...(q ? { OR: [{ message: match }, { service: match }] } : {}) };
       const [logs, rows, total] = await Promise.all([
         prisma.systemLog.findMany({ where: { organizationId } }),
-        prisma.systemLog.findMany({ where, orderBy: { createdAt: "desc" }, skip, take }),
+        prisma.systemLog.findMany({ where, orderBy: tableOrder<Prisma.SystemLogOrderByWithRelationInput>({
+          level: { level: direction },
+          service: { service: direction },
+          message: { message: direction },
+          latencyMs: { latencyMs: direction },
+          createdAt: { createdAt: direction }
+        }, { createdAt: "desc" }, { id: "asc" }), skip, take }),
         prisma.systemLog.count({ where })
       ]);
+      const latencies = logs.map((log) => log.latencyMs).sort((a, b) => a - b);
+      const p95 = latencies[Math.ceil(latencies.length * 0.95) - 1];
       return {
         id: dashboard,
         title: "System Monitoring",
         description: "Service health, logs, latency, error trends, and incident signals.",
         metrics: [
-          { label: "Uptime", value: "99.98%", change: 0.2, tone: "emerald" },
-          { label: "Errors", value: logs.filter((l) => l.level === "error").length, change: -8.2, tone: "rose" },
-          { label: "P95 latency", value: `${Math.max(...logs.map((l) => l.latencyMs), 0)}ms`, change: -4.5, tone: "sky" },
-          { label: "Services", value: new Set(logs.map((l) => l.service)).size, change: 0, tone: "violet" }
+          { label: "Log events", value: logs.length, tone: "emerald" },
+          { label: "Errors", value: logs.filter((l) => l.level === "error").length, tone: "rose" },
+          { label: "P95 latency", value: p95 === undefined ? "—" : p95 + " ms", tone: "sky" },
+          { label: "Services", value: new Set(logs.map((l) => l.service)).size, tone: "violet" }
         ],
         charts: [
-          { name: "Log levels", type: "bar", xKey: "level", yKeys: ["count"], data: ["info", "warn", "error"].map((l) => ({ level: l, count: logs.filter((x) => x.level === l).length })) },
-          { name: "Latency by service", type: "bar", xKey: "service", yKeys: ["latency"], data: ["api", "billing", "worker", "webhook"].map((service) => ({ service, latency: Math.round(sum(logs.filter((l) => l.service === service), (l) => l.latencyMs) / Math.max(logs.filter((l) => l.service === service).length, 1)) })) }
+          { name: "Log levels", filterKey: "level", type: "bar", xKey: "level", yKeys: ["count"], data: ["info", "warn", "error"].map((l) => ({ level: l, count: logs.filter((x) => x.level === l).length })) },
+          { name: "Latency by service", unit: "ms", type: "bar", xKey: "service", yKeys: ["latency"], data: ["api", "billing", "worker", "webhook"].map((service) => ({ service, latency: Math.round(sum(logs.filter((l) => l.service === service), (l) => l.latencyMs) / Math.max(logs.filter((l) => l.service === service).length, 1)) })) }
         ],
         table: {
-          title: "Live logs",
+          title: "Event log",
           columns: [
             { key: "level", label: "Level", type: "status" },
             { key: "service", label: "Service" },
             { key: "message", label: "Message" },
-            { key: "latencyMs", label: "Latency", type: "number" },
-            { key: "createdAt", label: "Time", type: "date" }
+            { key: "latencyMs", label: "Latency (ms)", type: "number" },
+            { key: "createdAt", label: "Time", type: "datetime" }
           ],
           rows,
           pagination: pagination(page, pageSize, total)
@@ -407,18 +437,24 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           { key: "level", label: "Level", options: ["all", "info", "warn", "error"].map((v) => ({ label: v, value: v })) }
         ],
         widgets: [
-          { title: "Health", value: "Nominal", detail: "No critical incidents active.", tone: "emerald" },
-          { title: "Trace sample", value: "Enabled", detail: "Slow requests are sampled at 100%.", tone: "violet" }
+          { title: "Error share", value: percent(logs.filter((l) => l.level === "error").length, logs.length) + "%", detail: "Error events as a share of recorded logs." },
+          { title: "Latency sample", value: String(logs.length) + " events", detail: "P95 uses the nearest-rank percentile across recorded event latencies." }
         ]
       };
     }
     case "crm": {
       const stage = statusFilter(query.stage ?? query.status);
-      const where = { organizationId, ...(stage ? { stage } : {}), ...(q ? { company: { contains: q, mode: "insensitive" as const } } : {}) };
+      const where = { organizationId, ...(stage ? { stage } : {}), ...(q ? { OR: [{ company: match }, { name: match }, { source: match }] } : {}) };
       const [leads, contacts, rows, total] = await Promise.all([
         prisma.lead.findMany({ where: { organizationId } }),
         prisma.contact.findMany({ where: { organizationId } }),
-        prisma.lead.findMany({ where, orderBy: { valueCents: "desc" }, skip, take }),
+        prisma.lead.findMany({ where, orderBy: tableOrder<Prisma.LeadOrderByWithRelationInput>({
+          name: { name: direction },
+          company: { company: direction },
+          source: { source: direction },
+          stage: { stage: direction },
+          value: { valueCents: direction }
+        }, { valueCents: "desc" }, { id: "asc" }), skip, take }),
         prisma.lead.count({ where })
       ]);
       return {
@@ -426,13 +462,13 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         title: "CRM Pipeline",
         description: "Lead flow, contacts, deal stages, and forecast quality for sales teams.",
         metrics: [
-          { label: "Pipeline", value: centsToCurrency(sum(leads, (l) => l.valueCents)), change: 16.8, tone: "emerald" },
-          { label: "Leads", value: leads.length, change: 10.2, tone: "sky" },
-          { label: "Contacts", value: contacts.length, change: 6.6, tone: "violet" },
-          { label: "Win probability", value: `${Math.round(sum(leads, (l) => l.probability) / Math.max(leads.length, 1))}%`, change: 2.7, tone: "amber" }
+          { label: "Pipeline", value: centsToCurrency(sum(leads, (l) => l.valueCents)), format: "currency", tone: "emerald" },
+          { label: "Leads", value: leads.length, tone: "sky" },
+          { label: "Contacts", value: contacts.length, tone: "violet" },
+          { label: "Win probability", value: `${Math.round(sum(leads, (l) => l.probability) / Math.max(leads.length, 1))}%`, tone: "amber" }
         ],
         charts: [
-          { name: "Deal pipeline", type: "bar", xKey: "stage", yKeys: ["value"], data: ["New", "Qualified", "Demo", "Proposal", "Negotiation"].map((s) => ({ stage: s, value: centsToCurrency(sum(leads.filter((l) => l.stage === s), (l) => l.valueCents)) })) },
+          { name: "Deal pipeline", unit: "USD", filterKey: "stage", type: "bar", xKey: "stage", yKeys: ["value"], data: ["New", "Qualified", "Demo", "Proposal", "Negotiation"].map((s) => ({ stage: s, value: centsToCurrency(sum(leads.filter((l) => l.stage === s), (l) => l.valueCents)) })) },
           { name: "Lead sources", type: "pie", xKey: "source", yKeys: ["count"], data: ["Inbound", "Outbound", "Partner", "Event"].map((source) => ({ source, count: leads.filter((l) => l.source === source).length })) }
         ],
         table: {
@@ -451,33 +487,39 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           { key: "stage", label: "Stage", options: ["all", "New", "Qualified", "Demo", "Proposal", "Negotiation"].map((v) => ({ label: v, value: v })) }
         ],
         widgets: [
-          { title: "Forecast", value: "Confident", detail: "Late-stage pipeline covers 78% of monthly target.", tone: "emerald" },
-          { title: "Next best action", value: "Proposal follow-up", detail: "Three deals are waiting on legal review.", tone: "amber" }
+          { title: "Weighted pipeline", value: money(sum(leads, (l) => l.valueCents * l.probability / 100)), detail: "Deal value weighted by each lead’s win probability." },
+          { title: "In negotiation", value: String(leads.filter((l) => l.stage === "Negotiation").length), detail: "Opportunities at the negotiation stage." }
         ]
       };
     }
     case "insights": {
       const category = statusFilter(query.category ?? query.status);
-      const where = { organizationId, ...(category ? { category } : {}), ...(q ? { title: { contains: q, mode: "insensitive" as const } } : {}) };
+      const where = { organizationId, ...(category ? { category } : {}), ...(q ? { OR: [{ title: match }, { summary: match }, { category: match }] } : {}) };
       const [insights, rows, total, orders] = await Promise.all([
         prisma.insight.findMany({ where: { organizationId } }),
-        prisma.insight.findMany({ where, orderBy: { impactScore: "desc" }, skip, take }),
+        prisma.insight.findMany({ where, orderBy: tableOrder<Prisma.InsightOrderByWithRelationInput>({
+          category: { category: direction },
+          title: { title: direction },
+          summary: { summary: direction },
+          impactScore: { impactScore: direction },
+          confidence: { confidence: direction }
+        }, { impactScore: "desc" }, { id: "asc" }), skip, take }),
         prisma.insight.count({ where }),
-        prisma.order.findMany({ where: { organizationId } })
+        prisma.order.findMany({ where: { organizationId }, orderBy: { createdAt: "asc" } })
       ]);
       return {
         id: dashboard,
         title: "AI Insights",
-        description: "Predictive recommendations, trend summaries, confidence scores, and action queues.",
+        description: "Sample recommendations and a scenario showing monthly order value with a 12% uplift.",
         metrics: [
-          { label: "Recommendations", value: insights.length, change: 21.1, tone: "violet" },
-          { label: "Avg confidence", value: `${Math.round(sum(insights, (i) => i.confidence) / Math.max(insights.length, 1))}%`, change: 4.8, tone: "emerald" },
-          { label: "Impact score", value: Math.round(sum(insights, (i) => i.impactScore) / Math.max(insights.length, 1)), change: 7.3, tone: "sky" },
-          { label: "Revenue signal", value: centsToCurrency(sum(orders.slice(-8), (o) => o.totalCents)), change: 12.4, tone: "amber" }
+          { label: "Recommendations", value: insights.length, tone: "violet" },
+          { label: "Avg confidence", value: `${Math.round(sum(insights, (i) => i.confidence) / Math.max(insights.length, 1))}%`, tone: "emerald" },
+          { label: "Impact score", value: Math.round(sum(insights, (i) => i.impactScore) / Math.max(insights.length, 1)), tone: "sky" },
+          { label: "Last 8 orders", value: centsToCurrency(sum(orders.slice(-8), (o) => o.totalCents)), format: "currency", tone: "amber" }
         ],
         charts: [
-          { name: "Insight impact", type: "bar", xKey: "category", yKeys: ["impact"], data: ["Revenue", "Retention", "Risk", "Ops"].map((category) => ({ category, impact: Math.round(sum(insights.filter((i) => i.category === category), (i) => i.impactScore) / Math.max(insights.filter((i) => i.category === category).length, 1)) })) },
-          { name: "Predicted revenue", type: "line", xKey: "month", yKeys: ["revenue"], data: timeSeries(orders).map((row) => ({ ...row, revenue: Math.round(Number(row.revenue) * 1.12) })) }
+          { name: "Insight impact", filterKey: "category", type: "bar", xKey: "category", yKeys: ["impact"], data: ["Revenue", "Retention", "Risk", "Ops"].map((category) => ({ category, impact: Math.round(sum(insights.filter((i) => i.category === category), (i) => i.impactScore) / Math.max(insights.filter((i) => i.category === category).length, 1)) })) },
+          { name: "Revenue scenario (+12%)", unit: "USD", type: "line", xKey: "month", yKeys: ["revenue"], data: timeSeries(orders.map((o) => ({ date: o.createdAt, cents: o.totalCents }))).map((row) => ({ ...row, revenue: Math.round(Number(row.revenue) * 1.12) })) }
         ],
         table: {
           title: "Recommendation queue",
@@ -495,8 +537,8 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           { key: "category", label: "Category", options: ["all", "Revenue", "Retention", "Risk", "Ops"].map((v) => ({ label: v, value: v })) }
         ],
         widgets: [
-          { title: "Trend summary", value: "Expansion likely", detail: "Recent order velocity implies stronger Q2 pipeline.", tone: "emerald" },
-          { title: "Mock model", value: "Rules + scoring", detail: "Replace service logic with your ML endpoint when ready.", tone: "violet" }
+          { title: "Scenario assumption", value: "+12%", detail: "Each historical month’s order value multiplied by 1.12." },
+          { title: "Recommendation scores", value: "Stored ratings", detail: "Impact and confidence come from the saved recommendation records." }
         ]
       };
     }

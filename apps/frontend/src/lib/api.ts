@@ -17,31 +17,66 @@ export type Session = {
   };
 };
 
+const sessionKey = "saas-kit-session";
+export const sessionEvent = "northstar-session";
+
 export const sessionStore = {
-  get: () => {
-    const raw = localStorage.getItem("saas-kit-session");
-    return raw ? (JSON.parse(raw) as Session) : null;
+  get: (): Session | null => {
+    try {
+      const raw = localStorage.getItem(sessionKey);
+      if (!raw) return null;
+      const candidate = JSON.parse(raw) as Session;
+      return candidate?.accessToken && candidate.refreshToken && candidate.user?.id ? candidate : null;
+    } catch { return null; }
   },
-  set: (session: Session) => localStorage.setItem("saas-kit-session", JSON.stringify(session)),
-  clear: () => localStorage.removeItem("saas-kit-session")
+  set(session: Session) {
+    localStorage.setItem(sessionKey, JSON.stringify(session));
+    window.dispatchEvent(new Event(sessionEvent));
+  },
+  clear() {
+    localStorage.removeItem(sessionKey);
+    window.dispatchEvent(new Event(sessionEvent));
+  }
 };
+
+function request(path: string, options: RequestInit, accessToken?: string) {
+  return fetch(API_URL + path, { ...options, headers: {
+    "Content-Type": "application/json",
+    ...(accessToken ? { Authorization: "Bearer " + accessToken } : {}), ...options.headers
+  } });
+}
+
+let refreshing: { token: string; promise: Promise<string> } | undefined;
+function renew(session: Session): Promise<string> {
+  if (refreshing?.token === session.refreshToken) return refreshing.promise;
+  const promise = (async () => {
+    const response = await request("/auth/refresh", { method: "POST", body: JSON.stringify({ refreshToken: session.refreshToken }) });
+    if (sessionStore.get()?.refreshToken !== session.refreshToken) throw new Error("Session changed.");
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) sessionStore.clear();
+      throw new Error(response.status === 401 || response.status === 403 ? "Please sign in again." : "Could not renew your session. Try again.");
+    }
+    const { accessToken, role } = await response.json();
+    if (sessionStore.get()?.refreshToken !== session.refreshToken) throw new Error("Session changed.");
+    sessionStore.set({ ...session, accessToken, user: { ...session.user, role: role ?? session.user.role } });
+    return accessToken;
+  })().finally(() => { if (refreshing?.token === session.refreshToken) refreshing = undefined; });
+  refreshing = { token: session.refreshToken, promise };
+  return promise;
+}
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const session = sessionStore.get();
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(session?.accessToken ? { Authorization: `Bearer ${session.accessToken}` } : {}),
-      ...options.headers
-    }
-  });
-
+  let response = await request(path, options, session?.accessToken);
+  if (response.status === 401 && session && !path.startsWith("/auth/")) {
+    const current = sessionStore.get();
+    if (!current || current.refreshToken !== session.refreshToken) throw new Error("Session changed.");
+    const token = current.accessToken === session.accessToken ? await renew(current) : current.accessToken;
+    response = await request(path, options, token);
+  }
   if (response.status === 204) return undefined as T;
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(payload.message ?? "Request failed");
-  }
+  if (!response.ok) throw new Error(payload.message ?? "Request failed");
   return payload as T;
 }
 

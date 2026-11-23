@@ -38,3 +38,7 @@ select {
 .dark ::-webkit-scrollbar-thumb {
   background: #3f4754;
 }
+
+:root { --chart-grid: #e4e4e7; --chart-tick: #52525b; --chart-bg: #fff; }
+.dark { --chart-grid: #3f3f46; --chart-tick: #d4d4d8; --chart-bg: #18181b; }
+:focus-visible { outline: 2px solid #0d9488; outline-offset: 2px; }

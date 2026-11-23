@@ -11,12 +11,20 @@
     "dev": "npm run dev --workspace @saas-kit/backend",
     "dev:backend": "npm run dev --workspace @saas-kit/backend",
     "dev:frontend": "npm run dev --workspace @saas-kit/frontend",
-    "build": "npm run build --workspace @saas-kit/backend && npm run build --workspace @saas-kit/frontend",
+    "build": "npm run build:shared && npm run prisma:generate --workspace @saas-kit/backend && npm run build --workspace @saas-kit/backend && npm run build --workspace @saas-kit/frontend",
     "db:migrate": "npm run prisma:migrate --workspace @saas-kit/backend",
-    "db:seed": "npm run seed --workspace @saas-kit/backend"
+    "db:seed": "npm run seed --workspace @saas-kit/backend",
+    "build:shared": "npm run build --workspace @saas-kit/shared",
+    "build:demo": "npm run build:shared && npm run build --workspace @saas-kit/frontend -- --mode pages-demo --base /multi-dashboard-saas-kit/",
+    "test": "tsx --test apps/backend/tests/reports.test.ts",
+    "test:demo": "playwright test",
+    "test:api": "tsx --test apps/backend/tests/workspace.test.ts"
   },
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=10.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1"
   }
 }
