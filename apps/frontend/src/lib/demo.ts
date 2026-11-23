@@ -65,8 +65,11 @@ export async function loadDemoDashboard(id: DashboardId, query: string): Promise
     const direction = params.get("direction") === "desc" ? -1 : 1;
     rows.sort((a, b) => {
       const left = a[column.key], right = b[column.key];
-      const order = typeof left === "number" && typeof right === "number"
-        ? left - right : String(left ?? "").localeCompare(String(right ?? ""));
+      // The seed database orders text case-sensitively and places nulls last in ascending order.
+      let order = 0;
+      if (left == null || right == null) order = Number(left == null) - Number(right == null);
+      else if (typeof left === "number" && typeof right === "number") order = left - right;
+      else if (String(left) !== String(right)) order = String(left) < String(right) ? -1 : 1;
       return order * direction || String(a.id).localeCompare(String(b.id));
     });
   }

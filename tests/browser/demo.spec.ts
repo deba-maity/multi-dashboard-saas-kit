@@ -84,6 +84,8 @@ test("global sort spans pages and CSV contains the entire result", async ({ page
 
 test("chart drill-down and a named view restore the same stock filter", async ({ page }) => {
   await page.goto("./#/dashboards/inventory");
+  await page.getByRole("button", { name: "Warehouse", exact: true }).click();
+  await expect(page.locator("#report-table tbody tr").first().locator("td").nth(2)).toHaveText("EU 3PL");
   await page.getByRole("button", { name: "Show records for Low" }).click();
   const filter = page.getByRole("combobox", { name: "Stock health" });
   await expect(filter).toHaveValue("low");
