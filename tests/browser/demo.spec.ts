@@ -100,3 +100,40 @@ test("chart drill-down and a named view restore the same stock filter", async ({
   await page.getByRole("button", { name: "Remove saved view Reorder list" }).click();
   await expect(page.getByRole("button", { name: "Reorder list", exact: true })).toHaveCount(0);
 });
+
+test("project board updates both lanes and restores a shared board link", async ({ page }) => {
+  await page.goto("./#/dashboards/projects");
+  await page.getByRole("button", { name: "Task board", exact: true }).click();
+  const blocked = page.getByRole("region", { name: "Blocked tasks", exact: true });
+  const progress = page.getByRole("region", { name: "In progress tasks", exact: true });
+  const count = blocked.getByRole("heading").locator("span");
+  const otherCount = progress.getByRole("heading").locator("span");
+  await expect(count).toHaveText(/^\d+$/);
+  await expect(otherCount).toHaveText(/^\d+$/);
+  const before = Number(await count.innerText());
+  const other = Number(await otherCount.innerText());
+  await blocked.getByRole("button").first().click();
+  await page.getByRole("dialog").getByRole("combobox").selectOption("in-progress");
+  await page.getByRole("button", { name: "Save status" }).click();
+  await expect(count).toHaveText(String(before - 1));
+  await expect(otherCount).toHaveText(String(other + 1));
+  await page.reload();
+  await expect(count).toHaveText(String(before - 1));
+  await page.getByRole("searchbox", {name:"Find tasks"}).fill("impossible search term");
+  await expect(page.getByText("No matching tasks")).toHaveCount(4);
+});
+
+test("reorder worksheet totals, warehouse selection and CSV agree", async ({ page }) => {
+  await page.goto("./#/dashboards/inventory");
+  await page.getByRole("button", { name: "Plan a reorder" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("24 units across 3 stock items")).toBeVisible();
+  await dialog.getByRole("combobox").selectOption("East Hub");
+  await dialog.getByLabel("Extra units per SKU").fill("10");
+  await expect(dialog.getByText("14 units across 1 stock item")).toBeVisible();
+  const download = page.waitForEvent("download");
+  await dialog.getByRole("button", {name: "Download draft CSV"}).click();
+  expect(await readFile((await (await download).path())!, "utf8")).toContain('"PULSE-SEAT","East Hub","18","22","32","14"');
+  await dialog.getByLabel("Extra units per SKU").fill("0");
+  await expect(dialog.getByRole("button", {name:"Download draft CSV"})).toBeDisabled();
+});

@@ -4,12 +4,22 @@ import { taskStatuses } from "@saas-kit/shared";
 import { prisma } from "../config/prisma.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
-import { HttpError } from "../utils/http.js";
+import { getTaskPage } from "../services/taskPage.js";
+import { HttpError, pageArgs } from "../utils/http.js";
 
 export const tasksRouter = Router();
 const changeStatus = z.object({
   params: z.object({ id: z.string().min(1) }),
   body: z.object({ status: z.enum(taskStatuses), previousStatus: z.enum(taskStatuses) })
+});
+
+tasksRouter.get("/", requireAuth, validate(z.object({ query: z.object({
+  status: z.enum(taskStatuses), search: z.string().optional(), page: z.string().optional(), pageSize: z.string().optional()
+}) })), async (req, res, next) => {
+  try {
+    const { page, pageSize } = pageArgs(req.query.page, req.query.pageSize);
+    res.json(await getTaskPage(req.auth!.organizationId, String(req.query.search ?? "").trim(), String(req.query.status), page, pageSize));
+  } catch (error) { next(error); }
 });
 
 tasksRouter.patch("/:id/status", requireAuth, requireRole("ADMIN"), validate(changeStatus), async (req, res, next) => {

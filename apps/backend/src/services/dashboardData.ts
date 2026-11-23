@@ -1,3 +1,4 @@
+import { getTaskPage } from "./taskPage.js";
 import type { Prisma } from "@prisma/client";
 import { analyticsWindow, orderSummary } from "./orderSummary.js";
 import { projectSummary } from "@saas-kit/shared";
@@ -310,18 +311,16 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
       };
     }
     case "projects": {
-      const where = { organizationId, ...(status ? { status } : {}), ...(q ? { OR: [{ title: match }, { project: match }, { assignee: { name: match } }] } : {}) };
-      const [tasks, rows, total] = await Promise.all([
+      const [tasks, taskPage] = await Promise.all([
         prisma.task.findMany({ where: { organizationId }, select: { status: true, priority: true } }),
-        prisma.task.findMany({ where, include: { assignee: { select: { name: true } } }, orderBy: tableOrder<Prisma.TaskOrderByWithRelationInput>({
+        getTaskPage(organizationId, q, status, page, pageSize, tableOrder<Prisma.TaskOrderByWithRelationInput>({
           title: { title: direction },
           project: { project: direction },
           assignee: { assignee: { name: direction } },
           priority: { priority: direction },
           status: { status: direction },
           dueDate: { dueDate: direction }
-        }, { dueDate: "asc" }, { id: "asc" }), skip, take }),
-        prisma.task.count({ where })
+        }, { dueDate: "asc" }, { id: "asc" }))
       ]);
       return {
         id: dashboard,
@@ -338,8 +337,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
             { key: "status", label: "Status", type: "status" },
             { key: "dueDate", label: "Due", type: "date" }
           ],
-          rows: rows.map((t) => ({ id: t.id, title: t.title, project: t.project, assignee: t.assignee?.name ?? "Unassigned", priority: t.priority, status: t.status, dueDate: t.dueDate })),
-          pagination: pagination(page, pageSize, total)
+          ...taskPage
         },
         filters: [
           { key: "status", label: "Task status", options: ["all", "todo", "in-progress", "done", "blocked"].map((v) => ({ label: v, value: v })) }

@@ -27,10 +27,18 @@ export async function downloadReport(id: DashboardId, query: URLSearchParams) {
     }
     for (const row of table.rows) lines.push(columns.map(({ key }) => csvCell(row[key])).join(","));
   }
+  downloadCsv(id, lines);
+}
+
+function downloadCsv(id: string, lines: string[]) {
   const url = URL.createObjectURL(new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
   link.download = "northstar-" + id + ".csv";
   link.click();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export function downloadWorksheet(rows: Array<Array<string | number>>) {
+  downloadCsv("reorder-plan", rows.map((row) => row.map(csvCell).join(",")));
 }

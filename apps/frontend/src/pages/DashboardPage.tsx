@@ -11,6 +11,8 @@ import { Button } from "../components/ui/Button";
 import { ChartCard } from "../components/ui/ChartCard";
 import { SavedViews } from "../components/ui/SavedViews";
 import { DataTable } from "../components/ui/DataTable";
+import { ReorderPlan } from "../components/ui/ReorderPlan";
+import { TaskBoard } from "../components/ui/TaskBoard";
 import { RecordDialog } from "../components/ui/RecordDialog";
 import { Modal } from "../components/ui/Modal";
 import { StatCard } from "../components/ui/StatCard";
@@ -28,6 +30,7 @@ export function DashboardPage() {
   const [params, setParams] = useSearchParams();
   const [row, setRow] = useState<Record<string, unknown> | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [planning, setPlanning] = useState(false);
   const [resetting, setResetting] = useState(false);
   const focusTable = params.get("view") === "records";
   const scrolled = useRef(false);
@@ -41,6 +44,7 @@ export function DashboardPage() {
   if (settledSearch) query.set("search", settledSearch);
   else query.delete("search");
   query.delete("view");
+  query.delete("layout");
   query.set("pageSize", "10");
   const page = Math.max(1, Math.min(100000, Math.floor(Number(params.get("page"))) || 1));
   query.set("page", String(page));
@@ -102,6 +106,7 @@ export function DashboardPage() {
   if (error) return <div role="alert" className="grid justify-items-start gap-3 rounded-lg border p-4">
     <p>{error instanceof Error ? error.message : "Unable to load dashboard."}</p><Button onClick={() => refetch()}>Retry</Button></div>;
   if (!data) return <p role="status" className="py-12 text-zinc-500">Loading report…</p>;
+  const board = dashboardId === "projects" && params.get("layout") === "board";
   const queues = [
     { label: "Review pending orders", to: "ecommerce?status=pending" },
     { label: "Review blocked tasks", to: "projects?status=blocked" },
@@ -112,6 +117,7 @@ export function DashboardPage() {
       <div>{isDemo && <p className="mb-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">Northstar Labs · Sample workspace</p>}
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{data.title}</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-300">{data.description}</p></div>
+      {dashboardId === "inventory" && <Button onClick={() => setPlanning(true)}>Plan a reorder</Button>}
       {dashboardId === "projects" && isDemo && <Button variant="secondary" size="sm" disabled={resetting} onClick={reset}><RotateCcw size={14} />Reset sample tasks</Button>}
     </header>
     {dashboardId === "analytics" && <div className="flex flex-wrap items-center justify-between gap-2">
@@ -124,6 +130,14 @@ export function DashboardPage() {
     {dashboardId === "analytics" && <nav aria-label="Review queues" className="flex flex-wrap gap-2">
       {queues.map(({ label, to }) => <Link key={to} to={"/dashboards/" + to + "&view=records"} className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-sm font-medium text-emerald-800 hover:bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">{label}<ArrowUpRight size={14} /></Link>)}
     </nav>}
+    {dashboardId === "projects" && <nav aria-label="Project layout" className="flex gap-2">
+      <Button variant={board ? "secondary" : "primary"} aria-pressed={!board} onClick={() => change({ layout: "", view: "" })}>Report</Button>
+      <Button variant={board ? "primary" : "secondary"} aria-pressed={board} onClick={() => change({ layout: "board", view: "", page: "", status: "" })}>Task board</Button>
+    </nav>}
+    {board ? <section aria-label="Task board" className="grid gap-3">
+      <FormField type="search" label="Find tasks" value={search} onChange={(e) => change({ search: e.target.value }, true)} />
+      <TaskBoard scope={scope} search={settledSearch} onOpen={setRow} />
+    </section> : <>
     <div className="grid min-w-0 gap-4 xl:grid-cols-2">{data.charts.map((chart) => {
       const filter = data.filters.find(({ key }) => chart.filterKey === key);
       function drill(category: string) {
@@ -140,6 +154,8 @@ export function DashboardPage() {
     <div className="grid gap-3 sm:grid-cols-2">{data.widgets.map((widget) => <article key={widget.title} className="border-l-2 border-emerald-500 px-4">
       <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{widget.title}</h2><p className="mt-1 font-semibold">{widget.value}</p>
       <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{widget.detail}</p></article>)}</div>
+    </>}
+    {planning && dashboardId === "inventory" && <ReorderPlan scope={scope} onClose={() => setPlanning(false)} />}
     {row && <RecordDialog data={data} row={row} canManage={isDemo || session?.user.role === "ADMIN"} onClose={() => setRow(null)} onRefresh={refresh} />}
     {dashboardId === "users" && !isDemo && session?.user.role === "ADMIN" && <UserCrudPanel />}
   </div>;

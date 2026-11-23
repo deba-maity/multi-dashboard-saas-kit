@@ -66,6 +66,11 @@ test("authenticated workspace reporting and task workflow", async (t) => {
   await t.test("members can read tasks and admins can update the project summary", async () => {
     const report = await (await request("/dashboard-data/projects?status=blocked", member.accessToken)).json();
     assert.equal(report.table.rows[0].id, task.id);
+    const lane = "/tasks?status=blocked&search=launch&pageSize=6";
+    const mine = await (await request(lane, member.accessToken)).json();
+    assert.equal(mine.rows[0].id, task.id);
+    const separate = await (await request(lane, other.accessToken)).json();
+    assert.equal(separate.pagination.total, 0);
     const path = "/tasks/" + task.id + "/status";
     const body = { previousStatus: "blocked", status: "in-progress" };
     assert.equal((await request(path, member.accessToken, "PATCH", body)).status, 403);
