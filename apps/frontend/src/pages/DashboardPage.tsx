@@ -31,7 +31,15 @@ export function DashboardPage() {
   const [resetting, setResetting] = useState(false);
   const focusTable = params.get("view") === "records";
   const scrolled = useRef(false);
+  const search = params.get("search") ?? "";
+  const [settledSearch, setSettledSearch] = useState(search);
+  useEffect(() => {
+    const pending = window.setTimeout(() => setSettledSearch(search), 180);
+    return () => window.clearTimeout(pending);
+  }, [search]);
   const query = new URLSearchParams(params);
+  if (settledSearch) query.set("search", settledSearch);
+  else query.delete("search");
   query.delete("view");
   query.set("pageSize", "10");
   const page = Math.max(1, Math.min(100000, Math.floor(Number(params.get("page"))) || 1));
@@ -128,7 +136,7 @@ export function DashboardPage() {
       }
       return <ChartCard key={chart.name} chart={chart} drill={filter ? drill : undefined} />;
     })}</div>
-    <DataTable data={data} actions={<SavedViews key={scope + dashboardId} scope={scope} dashboard={dashboardId} />} params={params} change={change} onOpen={setRow} onExport={exportCsv} exporting={exporting} fetching={isFetching} />
+    <DataTable data={data} actions={<SavedViews key={scope + dashboardId} scope={scope} dashboard={dashboardId} />} params={params} change={change} onOpen={setRow} onExport={exportCsv} exporting={exporting} fetching={isFetching || settledSearch !== search} />
     <div className="grid gap-3 sm:grid-cols-2">{data.widgets.map((widget) => <article key={widget.title} className="border-l-2 border-emerald-500 px-4">
       <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{widget.title}</h2><p className="mt-1 font-semibold">{widget.value}</p>
       <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{widget.detail}</p></article>)}</div>
@@ -176,7 +184,7 @@ function UserCrudPanel() {
         <form onSubmit={invite} className="grid gap-4">
           <FormField required minLength={2} label="Name" value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
           <FormField required label="Email" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} />
-          <FormField required minLength={8} autoComplete="new-password" label="Temporary password" type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} />
+          <FormField required minLength={8} autoComplete="new-password" label="Initial password" type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} />
           <label className="grid gap-1 text-sm font-semibold">Role<select className="rounded border bg-white p-2 dark:bg-zinc-950" value={form.role} onChange={(event) => setForm({ ...form, role: event.target.value })}><option value="MEMBER">Member</option><option value="ADMIN">Admin</option></select></label>
           {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
           <Button type="submit" disabled={saving}>{saving ? "Creating…" : "Create member"}</Button>

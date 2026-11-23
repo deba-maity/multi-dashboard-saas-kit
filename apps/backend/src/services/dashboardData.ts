@@ -23,6 +23,9 @@ type Query = Record<string, unknown>;
 const sum = <T>(items: T[], pick: (item: T) => number) =>
   items.reduce((total, item) => total + pick(item), 0);
 
+const categories = <T>(items: T[], pick: (item: T) => string) =>
+  [...new Set(items.map(pick))].sort((a, b) => a.localeCompare(b));
+
 const percent = (part: number, whole: number) =>
   whole === 0 ? 0 : Number(((part / whole) * 100).toFixed(1));
 
@@ -129,7 +132,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         ],
         charts: [
           { name: "Sales by month", unit: "USD", type: "area", xKey: "month", yKeys: ["revenue"], data: timeSeries(orders.map((o) => ({ date: o.createdAt, cents: o.totalCents }))) },
-          { name: "Orders by channel", type: "bar", xKey: "channel", yKeys: ["orders"], data: ["Web", "Retail", "Marketplace"].map((channel) => ({ channel, orders: orders.filter((o) => o.channel === channel).length })) }
+          { name: "Orders by channel", type: "bar", xKey: "channel", yKeys: ["orders"], data: categories(orders, (o) => o.channel).map((channel) => ({ channel, orders: orders.filter((o) => o.channel === channel).length })) }
         ],
         table: {
           title: "Order queue",
@@ -159,8 +162,8 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         }
       };
       const [members, rows, total] = await Promise.all([
-        prisma.organizationMember.findMany({ where: { organizationId }, include: { user: true } }),
-        prisma.organizationMember.findMany({ where, include: { user: true }, orderBy: tableOrder<Prisma.OrganizationMemberOrderByWithRelationInput>({
+        prisma.organizationMember.findMany({ where: { organizationId }, select: { role: true, user: { select: { status: true } } } }),
+        prisma.organizationMember.findMany({ where, select: { role: true, user: { select: { id: true, name: true, email: true, status: true, lastActiveAt: true } } }, orderBy: tableOrder<Prisma.OrganizationMemberOrderByWithRelationInput>({
           name: { user: { name: direction } },
           email: { user: { email: direction } },
           role: { role: direction },
@@ -283,7 +286,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           { label: "Avg stock per SKU", value: `${Math.round(sum(items, (i) => i.stock) / Math.max(items.length, 1))} units`, tone: "amber" }
         ],
         charts: [
-          { name: "Stock by warehouse", type: "bar", xKey: "warehouse", yKeys: ["stock"], data: ["East Hub", "West Hub", "EU 3PL"].map((warehouse) => ({ warehouse, stock: sum(items.filter((i) => i.warehouse === warehouse), (i) => i.stock) })) },
+          { name: "Stock by warehouse", type: "bar", xKey: "warehouse", yKeys: ["stock"], data: categories(items, (i) => i.warehouse).map((warehouse) => ({ warehouse, stock: sum(items.filter((i) => i.warehouse === warehouse), (i) => i.stock) })) },
           { name: "Reorder risk", filterKey: "status", type: "bar", xKey: "status", yKeys: ["count"], data: [{ status: "Low", count: low.length }, { status: "Healthy", count: items.length - low.length }] }
         ],
         table: {
@@ -309,8 +312,8 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
     case "projects": {
       const where = { organizationId, ...(status ? { status } : {}), ...(q ? { OR: [{ title: match }, { project: match }, { assignee: { name: match } }] } : {}) };
       const [tasks, rows, total] = await Promise.all([
-        prisma.task.findMany({ where: { organizationId }, include: { assignee: true } }),
-        prisma.task.findMany({ where, include: { assignee: true }, orderBy: tableOrder<Prisma.TaskOrderByWithRelationInput>({
+        prisma.task.findMany({ where: { organizationId }, select: { status: true, priority: true } }),
+        prisma.task.findMany({ where, include: { assignee: { select: { name: true } } }, orderBy: tableOrder<Prisma.TaskOrderByWithRelationInput>({
           title: { title: direction },
           project: { project: direction },
           assignee: { assignee: { name: direction } },
@@ -367,7 +370,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           { label: "CVR", value: `${percent(sum(campaigns, (c) => c.conversions), sum(campaigns, (c) => c.clicks))}%`, tone: "violet" }
         ],
         charts: [
-          { name: "Revenue by channel", unit: "USD", filterKey: "channel", type: "bar", xKey: "channel", yKeys: ["revenue"], data: ["Search", "Social", "Email", "Partner"].map((c) => ({ channel: c, revenue: centsToCurrency(sum(campaigns.filter((x) => x.channel === c), (x) => x.revenueCents)) })) },
+          { name: "Revenue by channel", unit: "USD", filterKey: "channel", type: "bar", xKey: "channel", yKeys: ["revenue"], data: categories(campaigns, (c) => c.channel).map((c) => ({ channel: c, revenue: centsToCurrency(sum(campaigns.filter((x) => x.channel === c), (x) => x.revenueCents)) })) },
           { name: "Clicks by launch month", type: "line", xKey: "month", yKeys: ["clicks"], data: timeSeries(campaigns.map((c) => ({ date: c.launchedAt, volume: c.clicks }))).map((row) => ({ month: row.month, clicks: row.volume })) }
         ],
         table: {
@@ -383,7 +386,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           pagination: pagination(page, pageSize, total)
         },
         filters: [
-          { key: "channel", label: "Channel", options: ["all", "Search", "Social", "Email", "Partner"].map((v) => ({ label: v, value: v })) }
+          { key: "channel", label: "Channel", options: ["all", ...categories(campaigns, (c) => c.channel)].map((v) => ({ label: v, value: v })) }
         ],
         widgets: [
           { title: "Total conversions", value: String(sum(campaigns, (c) => c.conversions)), detail: "Conversions reported by all campaigns." },
@@ -419,7 +422,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         ],
         charts: [
           { name: "Log levels", filterKey: "level", type: "bar", xKey: "level", yKeys: ["count"], data: ["info", "warn", "error"].map((l) => ({ level: l, count: logs.filter((x) => x.level === l).length })) },
-          { name: "Latency by service", unit: "ms", type: "bar", xKey: "service", yKeys: ["latency"], data: ["api", "billing", "worker", "webhook"].map((service) => ({ service, latency: Math.round(sum(logs.filter((l) => l.service === service), (l) => l.latencyMs) / Math.max(logs.filter((l) => l.service === service).length, 1)) })) }
+          { name: "Latency by service", unit: "ms", type: "bar", xKey: "service", yKeys: ["latency"], data: categories(logs, (log) => log.service).map((service) => ({ service, latency: Math.round(sum(logs.filter((l) => l.service === service), (l) => l.latencyMs) / Math.max(logs.filter((l) => l.service === service).length, 1)) })) }
         ],
         table: {
           title: "Event log",
@@ -447,7 +450,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
       const where = { organizationId, ...(stage ? { stage } : {}), ...(q ? { OR: [{ company: match }, { name: match }, { source: match }] } : {}) };
       const [leads, contacts, rows, total] = await Promise.all([
         prisma.lead.findMany({ where: { organizationId } }),
-        prisma.contact.findMany({ where: { organizationId } }),
+        prisma.contact.count({ where: { organizationId } }),
         prisma.lead.findMany({ where, orderBy: tableOrder<Prisma.LeadOrderByWithRelationInput>({
           name: { name: direction },
           company: { company: direction },
@@ -464,12 +467,12 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         metrics: [
           { label: "Pipeline", value: centsToCurrency(sum(leads, (l) => l.valueCents)), format: "currency", tone: "emerald" },
           { label: "Leads", value: leads.length, tone: "sky" },
-          { label: "Contacts", value: contacts.length, tone: "violet" },
+          { label: "Contacts", value: contacts, tone: "violet" },
           { label: "Win probability", value: `${Math.round(sum(leads, (l) => l.probability) / Math.max(leads.length, 1))}%`, tone: "amber" }
         ],
         charts: [
           { name: "Deal pipeline", unit: "USD", filterKey: "stage", type: "bar", xKey: "stage", yKeys: ["value"], data: ["New", "Qualified", "Demo", "Proposal", "Negotiation"].map((s) => ({ stage: s, value: centsToCurrency(sum(leads.filter((l) => l.stage === s), (l) => l.valueCents)) })) },
-          { name: "Lead sources", type: "pie", xKey: "source", yKeys: ["count"], data: ["Inbound", "Outbound", "Partner", "Event"].map((source) => ({ source, count: leads.filter((l) => l.source === source).length })) }
+          { name: "Lead sources", type: "pie", xKey: "source", yKeys: ["count"], data: categories(leads, (l) => l.source).map((source) => ({ source, count: leads.filter((l) => l.source === source).length })) }
         ],
         table: {
           title: "Open opportunities",

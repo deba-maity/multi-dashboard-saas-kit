@@ -2,11 +2,19 @@ import { projectSummary, reportSearchFields, taskStatuses, type DashboardId, typ
 
 export const isDemo = import.meta.env.MODE === "pages-demo";
 
-async function snapshot(id: DashboardId, period?: string | null): Promise<DashboardResponse> {
+const snapshots = new Map<string, Promise<DashboardResponse>>();
+function snapshot(id: DashboardId, period?: string | null): Promise<DashboardResponse> {
   const name = id === "analytics" && (period === "30" || period === "90") ? id + "-" + period : id;
-  const response = await fetch(import.meta.env.BASE_URL + "demo/" + name + ".json");
-  if (!response.ok) throw new Error("Unable to load the sample data. Try refreshing.");
-  return response.json();
+  const cached = snapshots.get(name);
+  if (cached) return cached;
+  const pending = fetch(import.meta.env.BASE_URL + "demo/" + name + ".json")
+    .then((response) => {
+      if (!response.ok) throw new Error("Unable to load the sample data. Try refreshing.");
+      return response.json() as Promise<DashboardResponse>;
+    })
+    .catch((error) => { snapshots.delete(name); throw error; });
+  snapshots.set(name, pending);
+  return pending;
 }
 
 const taskKey = (id: string) => "northstar.sample.task." + id;
@@ -33,7 +41,8 @@ export async function resetDemoTasks() {
 
 export async function loadDemoDashboard(id: DashboardId, query: string): Promise<DashboardResponse> {
   const params = new URLSearchParams(query);
-  const data = await snapshot(id, params.get("period"));
+  const original = await snapshot(id, params.get("period"));
+  const data = { ...original, table: { ...original.table } };
   if (id === "projects") {
     const tasks = data.table.rows.map((row) => ({
       ...row, status: savedStatus(String(row.id)) ?? row.status, priority: row.priority

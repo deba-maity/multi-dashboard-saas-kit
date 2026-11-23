@@ -60,7 +60,7 @@ export function DataTable({ data, actions, params, change, onOpen, onExport, exp
           </tr></thead>
           <tbody>{rows.map((row) => <tr key={String(row.id)} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50 dark:border-zinc-900 dark:hover:bg-zinc-900">
             {columns.map((column, i) => <td key={column.key} className="max-w-xs px-4 py-3">
-              {i === 0 ? <button className="text-left font-semibold text-emerald-800 underline decoration-emerald-300 underline-offset-2 dark:text-emerald-300" onClick={() => onOpen(row)}>{cellText(column, row[column.key])}</button> :
+              {i === 0 ? <button className="text-left font-semibold text-emerald-800 underline decoration-emerald-300 underline-offset-2 dark:text-emerald-300" disabled={fetching} onClick={() => onOpen(row)}>{cellText(column, row[column.key])}</button> :
                 column.type === "status" ? <Badge value={row[column.key]} /> : cellText(column, row[column.key])}
             </td>)}
           </tr>)}</tbody>

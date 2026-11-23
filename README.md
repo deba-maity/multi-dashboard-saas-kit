@@ -4,6 +4,8 @@ Northstar is a multi-tenant reporting workspace with ten dashboards, a React fro
 
 [Open the interactive demo](https://deba-maity.github.io/multi-dashboard-saas-kit/)
 
+![Northstar revenue overview showing booked revenue, order volume and review queues](docs/revenue-overview.jpg)
+
 **Try a two-minute walkthrough**
 
 1. In Analytics, select **30 days**. Compare booked revenue with the previous 30 complete UTC days, then use **View data** to see the numbers behind the chart.
