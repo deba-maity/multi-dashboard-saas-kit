@@ -28,6 +28,7 @@ export function DashboardPage() {
   const client = useQueryClient();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
+  const board = dashboardId === "projects" && params.get("layout") === "board";
   const [row, setRow] = useState<Record<string, unknown> | null>(null);
   const [exporting, setExporting] = useState(false);
   const [planning, setPlanning] = useState(false);
@@ -40,14 +41,14 @@ export function DashboardPage() {
     const pending = window.setTimeout(() => setSettledSearch(search), 180);
     return () => window.clearTimeout(pending);
   }, [search]);
-  const query = new URLSearchParams(params);
-  if (settledSearch) query.set("search", settledSearch);
+  const query = new URLSearchParams(board ? undefined : params);
+  if (!board && settledSearch) query.set("search", settledSearch);
   else query.delete("search");
   query.delete("view");
   query.delete("layout");
   query.set("pageSize", "10");
   const page = Math.max(1, Math.min(100000, Math.floor(Number(params.get("page"))) || 1));
-  query.set("page", String(page));
+  query.set("page", board ? "1" : String(page));
   const { data, error, isFetching, isPlaceholderData, refetch } = useQuery({
     queryKey: ["dashboard", dashboardId, scope, query.toString()],
     queryFn: () => loadReport(dashboardId, query),
@@ -66,11 +67,11 @@ export function DashboardPage() {
     if (!focusTable) scrolled.current = false;
   }, [ready, focusTable, data?.title]);
   useEffect(() => {
-    if (!data || isPlaceholderData || page <= data.table.pagination.pageCount) return;
+    if (board || !data || isPlaceholderData || page <= data.table.pagination.pageCount) return;
     const fixed = new URLSearchParams(params);
     fixed.set("page", String(data.table.pagination.pageCount));
     setParams(fixed, { replace: true, preventScrollReset: true });
-  }, [page, data, isPlaceholderData, params, setParams]);
+  }, [board, page, data, isPlaceholderData, params, setParams]);
   useEffect(() => {
     if (!isDemo || dashboardId !== "projects") return;
     const sync = (event: StorageEvent) => {
@@ -106,7 +107,6 @@ export function DashboardPage() {
   if (error) return <div role="alert" className="grid justify-items-start gap-3 rounded-lg border p-4">
     <p>{error instanceof Error ? error.message : "Unable to load dashboard."}</p><Button onClick={() => refetch()}>Retry</Button></div>;
   if (!data) return <p role="status" className="py-12 text-zinc-500">Loading report…</p>;
-  const board = dashboardId === "projects" && params.get("layout") === "board";
   const queues = [
     { label: "Review pending orders", to: "ecommerce?status=pending" },
     { label: "Review blocked tasks", to: "projects?status=blocked" },
