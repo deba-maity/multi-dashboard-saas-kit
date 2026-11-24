@@ -92,9 +92,9 @@ export function DashboardPage() {
   async function reset() {
     setResetting(true);
     try {
-      await resetDemoTasks();
+      const persisted = await resetDemoTasks();
       await refresh();
-      toast.push({ title: "Sample task statuses restored" });
+      toast.push({ title: persisted ? "Sample task statuses restored" : "Sample tasks restored for this tab" });
     } catch { toast.push({ title: "Could not reset sample tasks" }); }
     finally { setResetting(false); }
   }

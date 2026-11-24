@@ -123,12 +123,42 @@ test("project board updates both lanes and restores a shared board link", async 
   await expect(page.getByText("No matching tasks")).toHaveCount(4);
 });
 
+test("a browser with storage blocked can move sample tasks and keep views for this tab", async ({ page }) => {
+  await page.addInitScript(() => {
+    Storage.prototype.setItem = () => { throw new DOMException("Storage full", "QuotaExceededError"); };
+    Storage.prototype.removeItem = () => { throw new DOMException("Storage unavailable", "SecurityError"); };
+  });
+  await page.goto("./#/dashboards/projects?layout=board");
+  const blocked = page.getByRole("region", { name: "Blocked tasks", exact: true });
+  const count = blocked.getByRole("heading").locator("span");
+  await expect(count).toHaveText(/^\d+$/);
+  const original = Number(await count.innerText());
+  await blocked.getByRole("button").first().click();
+  await page.getByRole("dialog").getByRole("combobox").selectOption("in-progress");
+  await page.getByRole("button", { name: "Save status" }).click();
+  await expect(count).toHaveText(String(original - 1));
+  await expect(page.getByText("Task updated for this tab")).toBeVisible();
+  await page.getByRole("button", { name: "Save view", exact: true }).click();
+  await page.getByLabel("View name").fill("My board");
+  await page.getByRole("button", { name: "Save report view", exact: true }).click();
+  await page.getByRole("button", { name: "Report", exact: true }).click();
+  await page.getByRole("button", { name: "My board", exact: true }).click();
+  await expect(count).toHaveText(String(original - 1));
+  await page.getByRole("button", { name: "Reset sample tasks" }).click();
+  await expect(count).toHaveText(String(original));
+  await page.reload();
+  await expect(count).toHaveText(String(original));
+  await expect(page.getByRole("button", { name: "My board", exact: true })).toHaveCount(0);
+});
+
 test("reorder worksheet totals, warehouse selection and CSV agree", async ({ page }) => {
   await page.goto("./#/dashboards/inventory");
   await page.getByRole("button", { name: "Plan a reorder" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("24 units across 3 stock items")).toBeVisible();
+  await expect(dialog.getByRole("columnheader", { name: "Warehouse" })).toBeVisible();
   await dialog.getByRole("combobox").selectOption("East Hub");
+  await expect(dialog.getByRole("cell", { name: "East Hub", exact: true })).toBeVisible();
   await dialog.getByLabel("Extra units per SKU").fill("10");
   await expect(dialog.getByText("14 units across 1 stock item")).toBeVisible();
   const download = page.waitForEvent("download");
@@ -160,19 +190,22 @@ test("the demo stays readable when browser storage is disabled", async ({page}) 
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("combobox").selectOption("done");
   await dialog.getByRole("button", {name: "Save status"}).click();
-  await expect(dialog.getByRole("alert")).toContainText("Enable browser storage");
-  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByText("Task updated for this tab")).toBeVisible();
   await expect(blocked.getByRole("button").first()).toBeVisible();
 });
 
 test("saved views appear and disappear in other open tabs", async ({ page, context }) => {
   const other = await context.newPage();
   await Promise.all([page, other].map((tab) => tab.goto("./#/dashboards/inventory?status=low")));
+  await page.bringToFront();
   await expect(other.getByRole("button", { name: "Save view", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Save view", exact: true }).click();
   await page.getByLabel("View name").fill("Warehouse round");
   await page.getByRole("button", { name: "Save report view" }).click();
+  await other.bringToFront();
   await other.getByRole("button", { name: "Remove saved view Warehouse round" }).click({ timeout: 5000 });
+  await page.bringToFront();
   await expect(page.getByRole("button", { name: "Warehouse round", exact: true })).toHaveCount(0);
 });
 

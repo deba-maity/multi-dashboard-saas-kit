@@ -1,15 +1,16 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 import { CheckCircle2, X } from "lucide-react";
 
-type Toast = { id: string; title: string; message?: string };
+type Toast = { id: number; title: string; message?: string };
 type ToastContextValue = { push: (toast: Omit<Toast, "id">) => void };
 
 const ToastContext = createContext<ToastContextValue | null>(null);
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const nextId = useRef(0);
   const push = useCallback((toast: Omit<Toast, "id">) => {
-    const id = crypto.randomUUID();
+    const id = ++nextId.current;
     setToasts((current) => [...current, { ...toast, id }]);
     window.setTimeout(() => setToasts((current) => current.filter((item) => item.id !== id)), 4000);
   }, []);
@@ -18,9 +19,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div className="fixed right-4 top-4 z-50 grid gap-3">
+      <div aria-live="polite" aria-relevant="additions" className="fixed right-4 top-4 z-50 grid gap-3">
         {toasts.map((toast) => (
-          <div key={toast.id} className="flex w-80 items-start gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-soft dark:border-zinc-800 dark:bg-zinc-950">
+          <div key={toast.id} className="flex w-[min(20rem,calc(100vw-2rem))] items-start gap-3 rounded-lg border border-zinc-200 bg-white p-4 shadow-soft dark:border-zinc-800 dark:bg-zinc-950">
             <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-500" />
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-zinc-950 dark:text-white">{toast.title}</p>

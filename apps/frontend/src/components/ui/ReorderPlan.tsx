@@ -41,11 +41,12 @@ export function ReorderPlan({ scope, onClose }: { scope: string; onClose: () => 
       </label>
       {isLoading && <p role="status">Loading low-stock items…</p>}
       {error && <Button onClick={() => refetch()}>Retry loading inventory</Button>}
-      {data && valid && <><div className="max-h-[30vh] overflow-auto">
+      {data && !rows.length && <p role="status">This warehouse selection has no stock at or below its reorder point.</p>}
+      {data && rows.length > 0 && valid && <><div className="max-h-[30vh] overflow-auto">
         <table className="w-full text-left text-sm"><caption className="sr-only">Draft reorder quantities</caption>
-          <thead><tr>{["SKU", "On hand", "Target", "Order"].map((h) => <th className="p-1" key={h}>{h}</th>)}</tr></thead>
+          <thead><tr>{["SKU", "Warehouse", "On hand", "Target", "Order"].map((h) => <th className="p-1" key={h}>{h}</th>)}</tr></thead>
           <tbody>{rows.map((r) => <tr className="border-t dark:border-zinc-700" key={String(r.id)}>
-            <td className="p-1">{String(r.sku)}</td><td>{Number(r.stock)}</td><td>{Number(r.reorderPoint) + Number(buffer)}</td><td>{orderUnits(r)}</td>
+            <td className="p-1">{String(r.sku)}</td><td className="p-1">{String(r.warehouse)}</td><td>{Number(r.stock)}</td><td>{Number(r.reorderPoint) + Number(buffer)}</td><td>{orderUnits(r)}</td>
           </tr>)}</tbody>
         </table>
       </div><p aria-live="polite" className="font-semibold">{rows.reduce((sum, r) => sum + orderUnits(r), 0)} units across {rows.length} stock {rows.length === 1 ? "item" : "items"}</p></>}

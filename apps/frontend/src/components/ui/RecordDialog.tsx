@@ -1,3 +1,4 @@
+import { useToast } from "../../providers/ToastProvider";
 import { useState } from "react";
 import { taskStatuses, taskStatusLabels, type DashboardResponse, type TaskStatus } from "@saas-kit/shared";
 import { api, ApiError } from "../../lib/api";
@@ -14,12 +15,15 @@ export function RecordDialog({ data, row, canManage, onClose, onRefresh }: {
   const [previousStatus, setPreviousStatus] = useState(status);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const toast = useToast();
   const editable = data.id === "projects" && canManage;
   async function save() {
     setSaving(true);
     try {
-      if (isDemo) await changeDemoTask(String(row.id), previousStatus, status);
-      else await api("/tasks/" + encodeURIComponent(String(row.id)) + "/status", {
+      if (isDemo) {
+        const persisted = await changeDemoTask(String(row.id), previousStatus, status);
+        if (!persisted) toast.push({ title: "Task updated for this tab", message: "Storage is unavailable. Reloading the page restores the saved task." });
+      } else await api("/tasks/" + encodeURIComponent(String(row.id)) + "/status", {
         method: "PATCH", body: JSON.stringify({ status, previousStatus })
       });
       await onRefresh();
@@ -47,7 +51,7 @@ export function RecordDialog({ data, row, canManage, onClose, onRefresh }: {
           {taskStatuses.map((item) => <option value={item} key={item}>{taskStatusLabels[item]}</option>)}
         </select>
       </label>
-      {isDemo && <p className="text-xs text-zinc-500">Sample task changes are saved in this browser.</p>}
+      {isDemo && <p className="text-xs text-zinc-500">Sample task changes are saved in this browser when storage is available.</p>}
       {message && <p role="alert" className="text-sm text-rose-600">{message}</p>}
       <Button disabled={saving || status === previousStatus} onClick={save}>{saving ? "Saving…" : "Save status"}</Button>
     </div>}
