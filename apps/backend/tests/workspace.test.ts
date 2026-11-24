@@ -73,6 +73,28 @@ test("authenticated workspace reporting and task workflow", async (t) => {
     assert.equal(empty.table.pagination.total, 0);
     assert.equal(empty.metrics[0].value, 0);
   });
+  await t.test("inventory totals span the workspace and the reorder preview stays bounded", async () => {
+    for (let index = 0; index < 8; index++) {
+      const stock = index;
+      await prisma.product.create({ data: {
+        organizationId, sku: "PACK-" + index, name: "Packing stock", category: "Shipping", priceCents: 200,
+        inventoryItem: { create: { organizationId, warehouse: index % 2 ? "East" : "West",
+          supplier: index < 4 ? "Fabric" : "Fiber", stock, reorderPoint: 6 } }
+      } });
+    }
+    const path = "/dashboard-data/inventory?status=low&pageSize=2&page=3";
+    const report = await (await request(path, member.accessToken)).json();
+    assert.deepEqual(report.metrics.map((metric: { value: unknown }) => metric.value), [8, 28, 7, "4 units"]);
+    assert.deepEqual(report.charts[0].data, [{ warehouse: "East", stock: 16 }, { warehouse: "West", stock: 12 }]);
+    assert.equal(report.table.pagination.total, 7);
+    assert.deepEqual(report.table.rows.map((row: { sku: string }) => row.sku), ["PACK-4", "PACK-5"]);
+    assert.equal(report.widgets[0].detail, "PACK-0, PACK-1, PACK-2, PACK-3, PACK-4, and 2 more.");
+    assert.equal(report.widgets[1].value, "2");
+    const empty = await (await request(path, other.accessToken)).json();
+    assert.deepEqual(empty.charts[0].data, []);
+    assert.equal(empty.metrics[0].value, 0);
+    assert.equal(empty.table.pagination.total, 0);
+  });
   await t.test("members can read tasks and admins can update the project summary", async () => {
     const report = await (await request("/dashboard-data/projects?status=blocked", member.accessToken)).json();
     assert.equal(report.table.rows[0].id, task.id);

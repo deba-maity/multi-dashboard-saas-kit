@@ -264,8 +264,13 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         organizationId, stock,
         ...(q ? { OR: [{ product: { name: match } }, { product: { sku: match } }, { warehouse: match }] } : {})
       };
-      const [items, rows, total] = await Promise.all([
-        prisma.inventoryItem.findMany({ where: { organizationId }, include: { product: true } }),
+      const lowStock = { organizationId, stock: { lte: reorderPoint } };
+      const [warehouses, suppliers, lowCount, preview, rows, total] = await Promise.all([
+        prisma.inventoryItem.groupBy({ by: ["warehouse"], where: { organizationId }, _count: { _all: true }, _sum: { stock: true } }),
+        prisma.inventoryItem.groupBy({ by: ["supplier"], where: { organizationId } }),
+        prisma.inventoryItem.count({ where: lowStock }),
+        prisma.inventoryItem.findMany({ where: lowStock, orderBy: [{ stock: "asc" }, { id: "asc" }], take: 5,
+          select: { product: { select: { sku: true } } } }),
         prisma.inventoryItem.findMany({ where, include: { product: true }, orderBy: tableOrder<Prisma.InventoryItemOrderByWithRelationInput>({
           product: { product: { name: direction } },
           sku: { product: { sku: direction } },
@@ -275,20 +280,23 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         }, { stock: "asc" }, { id: "asc" }), skip, take }),
         prisma.inventoryItem.count({ where })
       ]);
-      const low = items.filter((i) => i.stock <= i.reorderPoint);
+      const itemCount = sum(warehouses, (row) => row._count._all);
+      const units = sum(warehouses, (row) => row._sum.stock ?? 0);
+      const skuList = preview.map((row) => row.product.sku).join(", ");
+      const reorderDetail = lowCount > preview.length ? skuList + ", and " + (lowCount - preview.length) + " more." : skuList;
       return {
         id: dashboard,
         title: "Inventory Control",
         description: "Stock health, product movement, supplier exposure, and reorder alerts.",
         metrics: [
-          { label: "SKUs tracked", value: items.length, tone: "sky" },
-          { label: "Units on hand", value: sum(items, (i) => i.stock), tone: "violet" },
-          { label: "Low stock", value: low.length, tone: "rose" },
-          { label: "Avg stock per SKU", value: `${Math.round(sum(items, (i) => i.stock) / Math.max(items.length, 1))} units`, tone: "amber" }
+          { label: "SKUs tracked", value: itemCount, tone: "sky" },
+          { label: "Units on hand", value: units, tone: "violet" },
+          { label: "Low stock", value: lowCount, tone: "rose" },
+          { label: "Avg stock per SKU", value: `${Math.round(units / Math.max(itemCount, 1))} units`, tone: "amber" }
         ],
         charts: [
-          { name: "Stock by warehouse", type: "bar", xKey: "warehouse", yKeys: ["stock"], data: categories(items, (i) => i.warehouse).map((warehouse) => ({ warehouse, stock: sum(items.filter((i) => i.warehouse === warehouse), (i) => i.stock) })) },
-          { name: "Reorder risk", filterKey: "status", type: "bar", xKey: "status", yKeys: ["count"], data: [{ status: "Low", count: low.length }, { status: "Healthy", count: items.length - low.length }] }
+          { name: "Stock by warehouse", type: "bar", xKey: "warehouse", yKeys: ["stock"], data: warehouses.sort((a, b) => a.warehouse.localeCompare(b.warehouse)).map((row) => ({ warehouse: row.warehouse, stock: row._sum.stock ?? 0 })) },
+          { name: "Reorder risk", filterKey: "status", type: "bar", xKey: "status", yKeys: ["count"], data: [{ status: "Low", count: lowCount }, { status: "Healthy", count: itemCount - lowCount }] }
         ],
         table: {
           title: "Stock ledger",
@@ -305,8 +313,8 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         },
         filters: [{ key: "status", label: "Stock health", options: [{ label: "All", value: "all" }, { label: "Low", value: "low" }, { label: "Healthy", value: "healthy" }] }],
         widgets: [
-          { title: "Reorder list", value: low.length + " SKUs", detail: low.map((i) => i.product.sku).join(", ") || "All stocked above reorder point." },
-          { title: "Suppliers", value: String(new Set(items.map((i) => i.supplier)).size), detail: "Distinct suppliers in the stock ledger." }
+          { title: "Reorder list", value: lowCount + " SKUs", detail: reorderDetail || "All stocked above reorder point." },
+          { title: "Suppliers", value: String(suppliers.length), detail: "Distinct suppliers in the stock ledger." }
         ]
       };
     }

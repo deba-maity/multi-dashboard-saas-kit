@@ -29,16 +29,17 @@ export function ReorderPlan({ scope, onClose }: { scope: string; onClose: () => 
       ...rows.map((r) => [String(r.sku), String(r.warehouse), Number(r.stock), Number(r.reorderPoint), Number(r.reorderPoint) + Number(buffer), orderUnits(r)])]);
   }
   return <Modal open title="Plan a reorder" onClose={onClose}>
-    <div className="grid gap-4">
+    <div className="grid min-w-0 grid-cols-1 gap-4">
       <p className="text-sm text-zinc-600 dark:text-zinc-300">Calculate a draft order for items at or below their reorder point. Set the extra stock you want on hand after delivery.</p>
       <FormField type="number" min="1" max="10000" step="1" label="Extra units per SKU" value={buffer} onChange={(e) => setBuffer(e.target.value)} />
       {!valid && <p role="alert" className="text-sm text-rose-600">Choose a whole number from 1 to 10,000.</p>}
-      <label className="grid gap-1 text-sm font-semibold">Warehouse
-        <select value={warehouse} onChange={(e) => setWarehouse(e.target.value)} className="rounded border bg-white p-2 dark:bg-zinc-950">
+      <div className="grid min-w-0 gap-1 text-sm font-semibold">
+        <label htmlFor="reorder-warehouse">Warehouse</label>
+        <select id="reorder-warehouse" value={warehouse} onChange={(e) => setWarehouse(e.target.value)} className="rounded border bg-white p-2 dark:bg-zinc-950">
           <option value="">All warehouses</option>
           {[...new Set((data ?? []).map((r) => String(r.warehouse)))].sort().map((name) => <option key={name}>{name}</option>)}
         </select>
-      </label>
+      </div>
       {isLoading && <p role="status">Loading low-stock items…</p>}
       {error && <Button onClick={() => refetch()}>Retry loading inventory</Button>}
       {data && !rows.length && <p role="status">This warehouse selection has no stock at or below its reorder point.</p>}

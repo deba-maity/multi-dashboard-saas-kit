@@ -71,7 +71,7 @@ function renew(session: Session): Promise<string> {
     if (sessionStore.get()?.refreshToken !== session.refreshToken) throw new Error("Session changed.");
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) sessionStore.clear();
-      throw new Error(response.status === 401 || response.status === 403 ? "Please sign in again." : "Could not renew your session. Try again.");
+      throw new ApiError(response.status, response.status === 401 || response.status === 403 ? "Please sign in again." : "Could not renew your session. Try again.");
     }
     const { accessToken, role } = await response.json();
     if (sessionStore.get()?.refreshToken !== session.refreshToken) throw new Error("Session changed.");

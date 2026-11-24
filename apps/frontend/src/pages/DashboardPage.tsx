@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, Plus, RotateCcw } from "lucide-react";
 import type { DashboardId } from "@saas-kit/shared";
-import { api } from "../lib/api";
+import { api, ApiError } from "../lib/api";
 import { isDemo, resetDemoTasks } from "../lib/demo";
 import { loadReport, downloadReport } from "../lib/report";
 import { dashboards } from "../lib/dashboards";
@@ -104,7 +104,10 @@ export function DashboardPage() {
     catch { toast.push({ title: "Export failed", message: "Please try again." }); }
     finally { setExporting(false); }
   }
-  if (error) return <div role="alert" className="grid justify-items-start gap-3 rounded-lg border p-4">
+  const transientFailure = error instanceof TypeError || (error instanceof ApiError &&
+    (error.status >= 500 || error.status === 408 || error.status === 429));
+  const showLastReport = data && !isPlaceholderData && transientFailure;
+  if (error && !showLastReport) return <div role="alert" className="grid justify-items-start gap-3 rounded-lg border p-4">
     <p>{error instanceof Error ? error.message : "Unable to load dashboard."}</p><Button onClick={() => refetch()}>Retry</Button></div>;
   if (!data) return <p role="status" className="py-12 text-zinc-500">Loading report…</p>;
   const queues = [
@@ -112,7 +115,11 @@ export function DashboardPage() {
     { label: "Review blocked tasks", to: "projects?status=blocked" },
     { label: "Inspect service errors", to: "monitoring?level=error" }
   ];
-  return <div className="grid min-w-0 gap-5">
+  return <div className="grid min-w-0 grid-cols-1 gap-5">
+    {showLastReport && <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+      <p role="status">Refresh failed. Showing the last loaded report.</p>
+      <Button variant="secondary" size="sm" disabled={isFetching} onClick={() => refetch()}>Retry refresh</Button>
+    </div>}
     <header className="flex flex-wrap items-start justify-between gap-3">
       <div>{isDemo && <p className="mb-1 text-xs font-medium text-emerald-700 dark:text-emerald-300">Northstar Labs · Sample workspace</p>}
         <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{data.title}</h1>
@@ -152,7 +159,7 @@ export function DashboardPage() {
       return <ChartCard key={chart.name} chart={chart} drill={filter ? drill : undefined} />;
     })}</div>
     <DataTable data={data} actions={<SavedViews key={scope + dashboardId} scope={scope} dashboard={dashboardId} />} params={params} change={change} onOpen={setRow} onExport={exportCsv} exporting={exporting} fetching={isFetching || settledSearch !== search} />
-    <div className="grid gap-3 sm:grid-cols-2">{data.widgets.map((widget) => <article key={widget.title} className="border-l-2 border-emerald-500 px-4">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{data.widgets.map((widget) => <article key={widget.title} className="min-w-0 [overflow-wrap:anywhere] border-l-2 border-emerald-500 px-4">
       <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{widget.title}</h2><p className="mt-1 font-semibold">{widget.value}</p>
       <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{widget.detail}</p></article>)}</div>
     </>}

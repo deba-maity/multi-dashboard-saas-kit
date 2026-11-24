@@ -17,6 +17,27 @@ test("all ten dashboards render on a phone without horizontal page overflow", as
   expect(errors).toEqual([]);
 });
 
+test("long inventory codes wrap on a phone and the worksheet scrolls inside its dialog", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const sku = "SHIP-" + "X".repeat(75);
+  await page.route("**/demo/inventory.json", async (route) => {
+    const response = await route.fetch();
+    const report = await response.json();
+    const low = report.table.rows.find((row: { status: string }) => row.status === "low");
+    low.sku = sku;
+    report.widgets[0].detail = sku + ", and 6 more.";
+    await route.fulfill({ response, json: report });
+  });
+  await page.goto("./#/dashboards/inventory");
+  await expect(page.getByText(sku + ", and 6 more.", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.getByRole("button", { name: "Plan a reorder" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("cell", { name: sku, exact: true })).toBeVisible();
+  await expect(dialog.getByLabel("Warehouse", { exact: true })).toBeVisible();
+  expect(await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+});
+
 test("a blocked task can be updated, reopened after reload and reset", async ({ page }) => {
   await page.goto("./");
   await page.getByRole("link", { name: "Review blocked tasks" }).click();
