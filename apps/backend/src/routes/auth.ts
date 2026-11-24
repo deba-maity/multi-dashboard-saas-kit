@@ -54,7 +54,7 @@ authRouter.post("/register", validate(registerSchema), async (req, res, next) =>
           }
         }
       },
-      include: { memberships: true }
+      include: { memberships: { include: { organization: true } } }
     });
 
     const membership = user.memberships[0];
@@ -74,6 +74,7 @@ authRouter.post("/register", validate(registerSchema), async (req, res, next) =>
         role: membership.role
       }),
       refreshToken,
+      organization: membership.organization,
       user: { id: user.id, name: user.name, email: user.email, role: membership.role }
     });
   } catch (error) {
@@ -97,16 +98,20 @@ authRouter.post("/login", validate(loginSchema), async (req, res, next) => {
     if (!membership) throw new HttpError(403, "No organization membership found");
 
     const refreshToken = signRefreshToken(user.id, membership.organizationId);
-    await prisma.$transaction([
-      prisma.user.update({ where: { id: user.id }, data: { lastActiveAt: new Date() } }),
-      prisma.refreshToken.create({
+    await prisma.$transaction(async (tx) => {
+      const active = await tx.user.updateMany({
+        where: { id: user.id, status: { in: ["INVITED", "ACTIVE"] } },
+        data: { lastActiveAt: new Date(), status: "ACTIVE" }
+      });
+      if (!active.count) throw new HttpError(403, "Account access is unavailable");
+      await tx.refreshToken.create({
         data: {
           userId: user.id,
           tokenHash: hashToken(refreshToken),
           expiresAt: new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000)
         }
-      })
-    ]);
+      });
+    });
 
     res.json({
       accessToken: signAccessToken({

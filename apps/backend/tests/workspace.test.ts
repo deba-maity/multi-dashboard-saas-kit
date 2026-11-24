@@ -31,7 +31,9 @@ test("authenticated workspace reporting and task workflow", async (t) => {
     const email = label + "-" + run + "@example.test";
     const registered = await request("/auth/register", undefined, "POST", { name: label, email, password, organizationName: label });
     assert.equal(registered.status, 201);
-    users.push((await registered.json()).user.id);
+    const registration = await registered.json();
+    users.push(registration.user.id);
+    assert.equal(registration.organization.name, label);
     const response = await request("/auth/login", undefined, "POST", { email, password });
     assert.equal(response.status, 200);
     const session = await response.json();
@@ -44,6 +46,14 @@ test("authenticated workspace reporting and task workflow", async (t) => {
   const memberResponse = await request("/users", tenant.accessToken, "POST", { name: "Report Member", email, password, role: "MEMBER" });
   assert.equal(memberResponse.status, 201);
   users.push((await memberResponse.json()).id);
+  const memberQuery = "/dashboard-data/users?search=Report&status=";
+  async function memberCount(status: string) {
+    const data = await (await request(memberQuery + status, tenant.accessToken)).json();
+    return data.table.pagination.total;
+  }
+  assert.equal(await memberCount("invited"), 1);
+  assert.equal((await request("/auth/login", undefined, "POST", { email, password: randomUUID() })).status, 401);
+  assert.equal(await memberCount("invited"), 1);
   const member = await (await request("/auth/login", undefined, "POST", { email, password })).json();
   const organizationId = tenant.organization.id;
   const task = await prisma.task.create({ data: {
@@ -76,17 +86,38 @@ test("authenticated workspace reporting and task workflow", async (t) => {
     assert.equal((await request(path, member.accessToken, "PATCH", body)).status, 403);
     assert.equal((await request(path, tenant.accessToken, "PATCH", body)).status, 204);
     assert.equal((await request(path, tenant.accessToken, "PATCH", body)).status, 204);
-    assert.equal((await request(path, tenant.accessToken, "PATCH", { ...body, status: "done" })).status, 409);
+    const conflict = await request(path, tenant.accessToken, "PATCH", { ...body, status: "done" });
+    assert.equal(conflict.status, 409);
+    assert.equal((await conflict.json()).details.currentStatus, "in-progress");
     const updated = await (await request("/dashboard-data/projects?status=blocked", tenant.accessToken)).json();
     assert.equal(updated.table.pagination.total, 0);
     assert.equal(updated.metrics.find((m: { label: string }) => m.label === "In progress").value, 1);
   });
-  await t.test("combined member search and status stay applied", async () => {
-    const query = "/dashboard-data/users?search=Report&status=";
-    const active = await (await request(query + "active", tenant.accessToken)).json();
-    const invited = await (await request(query + "invited", tenant.accessToken)).json();
-    assert.equal(active.table.pagination.total, 0);
-    assert.equal(invited.table.pagination.total, 1);
+  await t.test("a member's first successful sign-in clears their pending invitation", async () => {
+    assert.equal(await memberCount("active"), 1);
+    assert.equal(await memberCount("invited"), 0);
+  });
+  await t.test("report and task board searches match literal text and unassigned work", async () => {
+    const title = "Review 20% off A_B\\\\V2";
+    await prisma.task.create({ data: {
+      organizationId, title, project: "Delivery", priority: "low", status: "todo", dueDate: new Date()
+    } });
+    for (const search of ["%", "_", "\\\\", "unsigned", "unasSiGn", "A_B"]) {
+      const expected = search === "unsigned" ? 0 : search === "unasSiGn" ? 2 : 1;
+      const query = "?search=" + encodeURIComponent(search);
+      const report = await (await request("/dashboard-data/projects" + query, tenant.accessToken)).json();
+      assert.equal(report.table.pagination.total, expected, search);
+      const lane = await (await request("/tasks" + query + "&status=todo", tenant.accessToken)).json();
+      assert.equal(lane.pagination.total, expected ? 1 : 0, search);
+    }
+    await prisma.order.create({ data: {
+      organizationId, channel: "Web", status: "paid", customerName: "A_B Retail", totalCents: 700
+    } });
+    for (const id of ["analytics", "ecommerce"]) {
+      const data = await (await request("/dashboard-data/" + id + "?search=_", tenant.accessToken)).json();
+      assert.equal(data.table.pagination.total, 1);
+      assert.equal(data.table.rows[0].customerName, "A_B Retail");
+    }
   });
   await t.test("a refreshed session still opens the same workspace and expires on logout", async () => {
     const body = { refreshToken: member.refreshToken };
@@ -94,7 +125,7 @@ test("authenticated workspace reporting and task workflow", async (t) => {
     assert.equal(response.status, 200);
     const renewed = await response.json();
     const report = await (await request("/dashboard-data/projects", renewed.accessToken)).json();
-    assert.equal(report.table.pagination.total, 1);
+    assert.equal(report.table.pagination.total, 2);
     assert.equal((await request("/auth/logout", undefined, "POST", body)).status, 204);
     assert.equal((await request("/auth/refresh", undefined, "POST", body)).status, 401);
   });

@@ -1,3 +1,4 @@
+import { ApiError } from "./api";
 import { projectSummary, reportSearchFields, taskStatuses, type DashboardId, type DashboardResponse, type TaskStatus } from "@saas-kit/shared";
 
 export const isDemo = import.meta.env.MODE === "pages-demo";
@@ -30,12 +31,21 @@ export async function changeDemoTask(id: string, previousStatus: string, status:
   const data = await snapshot("projects");
   const task = data.table.rows.find((row) => row.id === id);
   if (!task) throw new Error("Task no longer exists in this sample.");
-  const current = savedStatus(id) ?? task.status;
-  if (current !== previousStatus && current !== status) throw new Error("This task changed. Reopen it to see the current status.");
-  try {
-    if (status === task.status) localStorage.removeItem(taskKey(id));
-    else localStorage.setItem(taskKey(id), status);
-  } catch { throw new Error("Enable browser storage to save sample task changes."); }
+  const originalStatus = task.status;
+  const key = taskKey(id);
+  function update() {
+    const current = savedStatus(id) ?? originalStatus;
+    if (current !== previousStatus && current !== status) {
+      throw new ApiError(409, "This task changed.", { currentStatus: current });
+    }
+    try {
+      if (status === originalStatus) localStorage.removeItem(key);
+      else localStorage.setItem(key, status);
+    } catch { throw new Error("Enable browser storage to save sample task changes."); }
+  }
+  // Two tabs can otherwise read the same old value and overwrite each other.
+  if (navigator.locks) await navigator.locks.request(key, update);
+  else update();
 }
 
 export async function resetDemoTasks() {

@@ -23,6 +23,8 @@ const colors = ["#10b981", "#0ea5e9", "#8b5cf6", "#f59e0b", "#ef4444"];
 export function ChartCard({ chart, drill }: { chart: ChartSeries; drill?: (category: string) => void }) {
   const [showData, setShowData] = useState(false);
   const formatNumber = (value: number | string) => chart.unit === "USD" ? currency(value) : chart.unit === "ms" ? value + " ms" : Number(value).toLocaleString("en-US");
+  const emptyPie = chart.type === "pie" && chart.data.every((row) => Number(row[chart.yKeys[0]]) === 0);
+  const singlePoint = chart.data.length === 1;
   const common = (
     <>
       <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
@@ -38,23 +40,23 @@ export function ChartCard({ chart, drill }: { chart: ChartSeries; drill?: (categ
         <h3 className="font-semibold text-zinc-950 dark:text-white">{chart.name}</h3>
         <button aria-label={(showData ? "Show chart for " : "View data for ") + chart.name} aria-pressed={showData} onClick={() => setShowData((shown) => !shown)} className="rounded border border-zinc-200 px-2 py-1 text-xs font-medium text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">{showData ? "Chart" : "View data"}</button>
       </div>
-      {showData ? <div className="h-56 overflow-auto"><table className="w-full text-left text-sm">
+      {!chart.data.length || (emptyPie && !showData) ? <div className="grid h-56 place-items-center text-sm text-zinc-500">No data for this period</div> : showData ? <div className="h-56 overflow-auto"><table className="w-full text-left text-sm">
         <caption className="sr-only">{chart.name}</caption><thead><tr>{[chart.xKey, ...chart.yKeys].map((key) => <th className="px-2 py-1.5" key={key}>{titleCase(key)}</th>)}</tr></thead>
         <tbody>{chart.data.map((row, i) => <tr key={i} className="border-t border-zinc-200 dark:border-zinc-800">{[chart.xKey, ...chart.yKeys].map((key) => <td key={key} className="px-2 py-1.5">{key === chart.xKey ? row[key] : formatNumber(row[key])}</td>)}</tr>)}</tbody>
-      </table></div> : !chart.data.length ? <div className="grid h-56 place-items-center text-sm text-zinc-500">No data for this period</div> : <div className="h-56">
+      </table></div> : <div className="h-56">
         <ResponsiveContainer width="100%" height="100%">
           {chart.type === "line" ? (
             <LineChart data={chart.data}>
               {common}
               {chart.yKeys.map((key, index) => (
-                <Line isAnimationActive={false} key={key} type="monotone" dataKey={key} stroke={colors[index]} strokeWidth={2.5} dot={false} />
+                <Line isAnimationActive={false} key={key} type="monotone" dataKey={key} stroke={colors[index]} strokeWidth={2.5} dot={singlePoint ? { r: 4, fill: colors[index] } : false} />
               ))}
             </LineChart>
           ) : chart.type === "area" ? (
             <AreaChart data={chart.data}>
               {common}
               {chart.yKeys.map((key, index) => (
-                <Area isAnimationActive={false} key={key} type="monotone" dataKey={key} stroke={colors[index]} fill={colors[index]} fillOpacity={0.15} />
+                <Area isAnimationActive={false} key={key} type="monotone" dataKey={key} stroke={colors[index]} fill={colors[index]} fillOpacity={0.15} dot={singlePoint ? { r: 4, fill: colors[index] } : false} />
               ))}
             </AreaChart>
           ) : chart.type === "pie" ? (

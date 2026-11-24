@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Bookmark, Link2, X } from "lucide-react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import { useToast } from "../../providers/ToastProvider";
@@ -17,6 +17,13 @@ function readViews(key: string): View[] {
 export function SavedViews({ dashboard, scope }: { dashboard: string; scope: string }) {
   const key = "northstar.views." + scope + "." + dashboard;
   const [views, setViews] = useState(() => readViews(key));
+  useEffect(() => {
+    const sync = (event: StorageEvent) => {
+      if (event.key === key || event.key === null) setViews(readViews(key));
+    };
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, [key]);
   const [name, setName] = useState("");
   const [dialog, setDialog] = useState(false);
   const [manualLink, setManualLink] = useState("");

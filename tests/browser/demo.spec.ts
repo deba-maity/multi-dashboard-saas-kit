@@ -164,3 +164,83 @@ test("the demo stays readable when browser storage is disabled", async ({page}) 
   await page.keyboard.press("Escape");
   await expect(blocked.getByRole("button").first()).toBeVisible();
 });
+
+test("saved views appear and disappear in other open tabs", async ({ page, context }) => {
+  const other = await context.newPage();
+  await Promise.all([page, other].map((tab) => tab.goto("./#/dashboards/inventory?status=low")));
+  await expect(other.getByRole("button", { name: "Save view", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Save view", exact: true }).click();
+  await page.getByLabel("View name").fill("Warehouse round");
+  await page.getByRole("button", { name: "Save report view" }).click();
+  await other.getByRole("button", { name: "Remove saved view Warehouse round" }).click({ timeout: 5000 });
+  await expect(page.getByRole("button", { name: "Warehouse round", exact: true })).toHaveCount(0);
+});
+
+test("switching project layouts keeps the report filter and sort", async ({ page }) => {
+  await page.goto("./#/dashboards/projects?status=blocked&sort=title&direction=desc");
+  await page.getByRole("button", { name: "Task board", exact: true }).click();
+  await expect(page.getByRole("region", { name: "To do tasks", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Report", exact: true }).click();
+  await expect(page.getByRole("combobox", { name: "Task status", exact: true })).toHaveValue("blocked");
+  await expect(page.locator("#report-table tr th[aria-sort=descending]")).toContainText("Task");
+});
+
+test.describe("UTC accounting dates", () => {
+  test.use({ timezoneId: "Pacific/Kiritimati" });
+  test("the displayed ledger date agrees with the reporting window and export", async ({ page, request }) => {
+    const snapshot = await (await request.get("demo/analytics-30.json")).json();
+    const date = new Date(snapshot.table.rows[0].createdAt);
+    const expected = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" }).format(date);
+    await page.goto("./#/dashboards/analytics?period=30");
+    const first = page.locator("#report-table tbody tr").first();
+    await expect(first.locator("td").last()).toHaveText(expected);
+    const downloading = page.waitForEvent("download");
+    await page.getByRole("button", { name: "Export CSV" }).click();
+    const csv = await readFile((await (await downloading).path())!, "utf8");
+    expect(csv.split(/\r?\n/)[1]).toContain(date.toISOString());
+    await first.getByRole("button").click();
+    await expect(page.getByRole("dialog")).toContainText(expected);
+  });
+});
+
+test("two editors resolve conflicting changes to a task inside the open dialog", async ({ page, context }) => {
+  const other = await context.newPage();
+  const tabs = [page, other];
+  for (const tab of tabs) {
+    await tab.goto("./#/dashboards/projects?status=blocked");
+    await tab.locator("#report-table tbody tr").first().getByRole("button").click();
+  }
+  const first = page.getByRole("dialog"), second = other.getByRole("dialog");
+  await first.getByRole("combobox").selectOption("done");
+  await first.getByRole("button", { name: "Save status" }).click();
+  await expect(first).toHaveCount(0);
+  await second.getByRole("combobox").selectOption("todo");
+  await second.getByRole("button", { name: "Save status" }).click();
+  await expect(second.getByRole("alert")).toContainText("moved this task to Done");
+  await expect(second.getByRole("combobox")).toHaveValue("done");
+  await expect(second.getByRole("button", { name: "Save status" })).toBeDisabled();
+  await second.getByRole("combobox").selectOption("in-progress");
+  await second.getByRole("button", { name: "Save status" }).click();
+  await expect(second).toHaveCount(0);
+});
+
+test("single-month series render an actual point and empty pie charts explain the empty state", async ({ page }) => {
+  await page.route("**/demo/finance.json", async (route) => {
+    const response = await route.fetch();
+    const report = await response.json();
+    report.charts[0].data = [{ month: "Nov 2026", revenue: 125 }];
+    await route.fulfill({ response, json: report });
+  });
+  await page.goto("./#/dashboards/finance");
+  await expect(page.locator(".recharts-line-dot")).toHaveCount(1);
+  await page.route("**/demo/users.json", async (route) => {
+    const response = await route.fetch();
+    const report = await response.json();
+    report.charts[1].data.forEach((row: { count: number }) => { row.count = 0; });
+    await route.fulfill({ response, json: report });
+  });
+  await page.goto("./#/dashboards/users");
+  await expect(page.getByText("No data for this period")).toBeVisible();
+  await page.getByRole("button", { name: "View data for Activity status" }).click();
+  await expect(page.getByRole("table", { name: "Activity status" }).getByRole("row")).toHaveCount(4);
+});

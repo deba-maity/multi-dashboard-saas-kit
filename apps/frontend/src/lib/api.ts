@@ -20,24 +20,41 @@ export type Session = {
 const sessionKey = "saas-kit-session";
 export const sessionEvent = "northstar-session";
 
+// Some browsers allow reads while rejecting writes (e.g. quota limits).
+// Keep this tab's sign-in/sign-out authoritative if a write fails.
+let tabSession: Session | null = null;
+let tabOnly = false;
 export const sessionStore = {
-  get: (): Session | null => {
+  get(): Session | null {
+    if (tabOnly) return tabSession;
+    let raw: string | null;
+    try { raw = localStorage.getItem(sessionKey); }
+    catch { return tabSession; }
     try {
-      const raw = localStorage.getItem(sessionKey);
-      if (!raw) return null;
-      const candidate = JSON.parse(raw) as Session;
-      return candidate?.accessToken && candidate.refreshToken && candidate.user?.id ? candidate : null;
-    } catch { return null; }
+      const candidate: Session | null = raw ? JSON.parse(raw) : null;
+      tabSession = candidate?.accessToken && candidate.refreshToken && candidate.user?.id ? candidate : null;
+    } catch { tabSession = null; }
+    return tabSession;
   },
   set(session: Session) {
-    localStorage.setItem(sessionKey, JSON.stringify(session));
+    tabSession = session;
+    try { localStorage.setItem(sessionKey, JSON.stringify(session)); tabOnly = false; }
+    catch { tabOnly = true; }
     window.dispatchEvent(new Event(sessionEvent));
   },
   clear() {
-    localStorage.removeItem(sessionKey);
+    tabSession = null;
+    try { localStorage.removeItem(sessionKey); tabOnly = false; }
+    catch { tabOnly = true; }
     window.dispatchEvent(new Event(sessionEvent));
   }
 };
+
+export class ApiError extends Error {
+  constructor(public readonly status: number, message: string, public readonly details?: Record<string, unknown>) {
+    super(message);
+  }
+}
 
 function request(path: string, options: RequestInit, accessToken?: string) {
   return fetch(API_URL + path, { ...options, headers: {
@@ -76,7 +93,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   }
   if (response.status === 204) return undefined as T;
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.message ?? "Request failed");
+  if (!response.ok) throw new ApiError(response.status, payload.message ?? "Request failed", payload.details);
   return payload as T;
 }
 

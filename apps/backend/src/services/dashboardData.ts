@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { analyticsWindow, orderSummary } from "./orderSummary.js";
 import { projectSummary } from "@saas-kit/shared";
 import { prisma } from "../config/prisma.js";
-import { centsToCurrency, pageArgs, pagination } from "../utils/http.js";
+import { centsToCurrency, containsText, pageArgs, pagination } from "../utils/http.js";
 
 type DashboardId =
   | "analytics"
@@ -63,7 +63,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
   const status = statusFilter(query.status);
 
   const direction = query.direction === "desc" ? "desc" : "asc";
-  const match = { contains: q, mode: "insensitive" as const };
+  const match = containsText(q);
   const orderWhere = {
     organizationId, ...(status ? { status } : {}),
     ...(q ? { OR: [{ customerName: match }, { channel: match }, { status: match }] } : {})

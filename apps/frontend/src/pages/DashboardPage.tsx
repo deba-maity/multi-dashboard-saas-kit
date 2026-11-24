@@ -132,7 +132,7 @@ export function DashboardPage() {
     </nav>}
     {dashboardId === "projects" && <nav aria-label="Project layout" className="flex gap-2">
       <Button variant={board ? "secondary" : "primary"} aria-pressed={!board} onClick={() => change({ layout: "", view: "" })}>Report</Button>
-      <Button variant={board ? "primary" : "secondary"} aria-pressed={board} onClick={() => change({ layout: "board", view: "", page: "", status: "" })}>Task board</Button>
+      <Button variant={board ? "primary" : "secondary"} aria-pressed={board} onClick={() => change({ layout: "board", view: "" })}>Task board</Button>
     </nav>}
     {board ? <section aria-label="Task board" className="grid gap-3">
       <FormField type="search" label="Find tasks" value={search} onChange={(e) => change({ search: e.target.value }, true)} />

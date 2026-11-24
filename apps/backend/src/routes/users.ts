@@ -5,7 +5,7 @@ import { prisma } from "../config/prisma.js";
 import { requireAuth, requireRole } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import { hashPassword } from "../utils/security.js";
-import { HttpError, pageArgs, pagination } from "../utils/http.js";
+import { containsText, HttpError, pageArgs, pagination } from "../utils/http.js";
 
 export const usersRouter = Router();
 usersRouter.use(requireAuth);
@@ -26,7 +26,7 @@ usersRouter.get("/", validate(listSchema), async (req, res, next) => {
     const where = {
       organizationId: req.auth!.organizationId,
       ...(req.query.role ? { role: req.query.role as MemberRole } : {}),
-      ...(search ? { user: { name: { contains: search, mode: "insensitive" as const } } } : {})
+      ...(search ? { user: { name: containsText(search) } } : {})
     };
     const [members, total] = await Promise.all([
       prisma.organizationMember.findMany({ where, include: { user: true }, skip, take, orderBy: { createdAt: "desc" } }),

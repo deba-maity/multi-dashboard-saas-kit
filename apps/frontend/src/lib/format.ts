@@ -9,7 +9,7 @@ export function cellText(column: TableColumn, value: unknown) {
   if (column.type === "date" || column.type === "datetime") {
     const date = new Date(String(value));
     if (Number.isNaN(date.getTime())) return "—";
-    return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", ...(column.type === "datetime" ? { timeStyle: "short" as const } : {}) }).format(date);
+    return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", ...(column.type === "datetime" ? { timeStyle: "short" as const } : { timeZone: "UTC" }) }).format(date);
   }
   if (column.type === "percent") return String(value) + "%";
   if (column.type === "number") return new Intl.NumberFormat("en-US").format(Number(value));

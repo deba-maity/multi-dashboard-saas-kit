@@ -12,6 +12,12 @@ export class HttpError extends Error {
 export const centsToCurrency = (cents: number) =>
   Number((cents / 100).toFixed(2));
 
+// PostgreSQL treats these characters as wildcards in contains filters.
+export const containsText = (text?: string) => ({
+  contains: text?.replace(/[\\%_]/g, "\\$&"),
+  mode: "insensitive" as const
+});
+
 export const pageArgs = (page?: unknown, pageSize?: unknown) => {
   const parsedPage = Math.min(100000, Math.max(Math.floor(Number(page)) || 1, 1));
   const parsedSize = Math.min(Math.max(Math.floor(Number(pageSize)) || 10, 1), 50);

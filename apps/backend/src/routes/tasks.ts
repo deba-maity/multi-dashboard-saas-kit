@@ -32,7 +32,7 @@ tasksRouter.patch("/:id/status", requireAuth, requireRole("ADMIN"), validate(cha
     if (!count) {
       const current = await prisma.task.findFirst({ where, select: { status: true } });
       if (!current) throw new HttpError(404, "Task not found");
-      if (current.status !== req.body.status) throw new HttpError(409, "This task changed. Reopen it to see the current status.");
+      if (current.status !== req.body.status) throw new HttpError(409, "This task changed.", { currentStatus: current.status });
     }
     res.sendStatus(204);
   } catch (error) {
