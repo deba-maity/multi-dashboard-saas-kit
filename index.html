@@ -4,6 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Northstar SaaS Dashboard Kit</title>
+    <script>
+      try {
+        if (localStorage.getItem("theme") === "dark") document.documentElement.classList.add("dark");
+      } catch { /* Storage can be disabled in a private browsing session. */ }
+    </script>
     <script type="module" crossorigin src="/multi-dashboard-saas-kit/assets/index-NC9ngo57.js"></script>
     <link rel="modulepreload" crossorigin href="/multi-dashboard-saas-kit/assets/query-CfJfpo9k.js">
     <link rel="modulepreload" crossorigin href="/multi-dashboard-saas-kit/assets/react-fUUABmda.js">
