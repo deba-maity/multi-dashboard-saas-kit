@@ -176,6 +176,13 @@ async function main() {
     });
   }
 
+  await prisma.campaign.createMany({data: [
+    { organizationId: organization.id, name: "Customer referral pilot", channel: "Organic", spendCents: 0,
+      revenueCents: 82500, clicks: 188, conversions: 9, status: "active", launchedAt: daysAgo(12) },
+    { organizationId: organization.id, name: "Paid search experiment", channel: "Search", spendCents: 74550,
+      revenueCents: 53200, clicks: 402, conversions: 5, status: "complete", launchedAt: daysAgo(20) }
+  ]});
+
   for (let i = 0; i < 42; i += 1) {
     await prisma.systemLog.create({
       data: {

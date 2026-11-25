@@ -12,7 +12,7 @@ export type DashboardId =
   | "crm"
   | "insights";
 
-export const ledgerDashboards = ["finance", "inventory", "monitoring"] as const;
+export const ledgerDashboards = ["finance", "inventory", "marketing", "monitoring"] as const;
 
 export type ApiPagination = {
   page: number;
@@ -25,6 +25,7 @@ export type TableColumn = {
   key: string;
   label: string;
   sortable?: boolean;
+  nullsLast?: boolean;
   type?: "datetime" | "text" | "number" | "currency" | "date" | "status" | "percent";
 };
 

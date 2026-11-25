@@ -390,6 +390,7 @@ test("the scenario starts from Analytics revenue and its assumption, totals and 
 
 test("keyboard report search opens the collections ledger and respects an open record", async ({page}) => {
   await page.goto("./");
+  await expect(page.getByRole("heading", {name: "Revenue overview"})).toBeVisible();
   await page.keyboard.press("Control+k");
   const finder = page.getByRole("combobox", {name: "Find by name or topic"});
   await finder.fill("invoice overdue");
@@ -474,4 +475,70 @@ test("unknown historical period links show the all-time report without a compari
   await expect(page.getByRole("button", {name:"All time",exact:true})).toHaveAttribute("aria-pressed","true");
   await expect(page.getByText("All recorded orders", {exact:true})).toBeVisible();
   await expect(page.getByText(/vs previous period/)).toHaveCount(0);
+});
+
+test("campaign returns rank both directions and distinguish no spend from break-even", async ({page}) => {
+  await page.route("**/demo/marketing.json", async (route) => {
+    const response = await route.fetch();
+    const report = await response.json();
+    const [first, second, third] = report.table.rows;
+    report.table.rows = [
+      {...first, name: "Organic referral", channel: "Email", spend: 0, revenue: 50, roi: null},
+      {...second, name: "Break-even launch", channel: "Email", spend: 25, revenue: 25, roi: 0},
+      {...third, name: "Paid launch", channel: "Email", spend: 25, revenue: 75, roi: 200}
+    ];
+    await route.fulfill({ response, json: report });
+  });
+  await page.goto("./");
+  await expect(page.getByRole("heading", {name: "Revenue overview"})).toBeVisible();
+  await page.keyboard.press("Control+k");
+  await page.getByRole("combobox", {name: "Find by name or topic"}).fill("roi");
+  await page.keyboard.press("Enter");
+  const rows = page.locator("#report-table tbody tr");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.first()).toContainText("Paid launch");
+  await expect(rows.last().getByRole("cell").last()).toHaveText("—");
+  const sorted = page.getByRole("button", {name: "ROI", exact: true});
+  await sorted.click();
+  await expect(rows.first()).toContainText("Break-even launch");
+  await expect(rows.first().getByRole("cell").last()).toHaveText("0%");
+  await expect(rows.last()).toContainText("Organic referral");
+  await rows.last().getByRole("button").click();
+  const dialog = page.getByRole("dialog", {name: "Organic referral"});
+  await expect(dialog).toContainText("Spend$0");
+  await expect(dialog).toContainText("Revenue$50");
+  await dialog.getByRole("button", {name: "Close dialog"}).click();
+  const downloading = page.waitForEvent("download");
+  await page.getByRole("button", {name: "Export CSV", exact: true}).click();
+  const csv = await readFile((await (await downloading).path())!, "utf8");
+  expect(csv).toContain('"Spend","Revenue","ROI"');
+  expect(csv.trim().split(/\r?\n/).at(-1)).toMatch(/"0","50",""$/);
+});
+
+test("long service names fit the phone filter and remain reachable beyond the chart's top eight", async ({page}) => {
+  await page.setViewportSize({width: 320, height: 740});
+  const names = Array.from({length: 12}, (_, i) => i === 11 ? "edge-" + "regional".repeat(14) : "service-" + i);
+  await page.route("**/demo/monitoring.json", async (route) => {
+    const response = await route.fetch();
+    const report = await response.json();
+    const chart = report.charts.find((item: {filterKey: string}) => item.filterKey === "service");
+    chart.data = names.map((service, i) => ({service, average: i, p95: 100 + i}));
+    const filter = report.filters.find((item: {key: string}) => item.key === "service");
+    filter.options = [filter.options[0], ...names.map(value => ({label: value, value}))];
+    report.table.rows = names.map((service, i) => ({...report.table.rows[0], id: "m" + i, service, message: "Event " + i}));
+    await route.fulfill({response, json: report});
+  });
+  await page.goto("./#/dashboards/monitoring");
+  const chart = page.getByRole("heading", {name: "Latency across services"}).locator("../..");
+  await expect(chart.getByRole("button", {name: /^Show records for/})).toHaveCount(8);
+  await chart.getByRole("button", {name: "View data for Latency across services"}).click();
+  await expect(chart.getByRole("button", {name: /^Show records for/})).toHaveCount(12);
+  await chart.getByRole("button", {name: "Show records for service-0", exact: true}).click();
+  const select = page.getByLabel("Service", {exact: true});
+  await expect(select).toHaveValue(names[0]);
+  await select.selectOption(names[11]);
+  await expect(page.getByRole("button", {name: "Event 11"})).toBeVisible();
+  const bounds = (await select.boundingBox())!;
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });

@@ -100,7 +100,10 @@ export async function loadDemoDashboard(id: DashboardId, query: string): Promise
       const left = a[column.key], right = b[column.key];
       // The seed database orders text case-sensitively and places nulls last in ascending order.
       let order = 0;
-      if (left == null || right == null) order = Number(left == null) - Number(right == null);
+      if (left == null || right == null) {
+        order = Number(left == null) - Number(right == null);
+        if (column.nullsLast && order) return order;
+      }
       else if (typeof left === "number" && typeof right === "number") order = left - right;
       else if (String(left) !== String(right)) order = String(left) < String(right) ? -1 : 1;
       return order * direction || String(a.id).localeCompare(String(b.id));

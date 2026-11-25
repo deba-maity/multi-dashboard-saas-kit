@@ -1,4 +1,5 @@
 import { getInventoryLedger } from "./inventoryLedger.js";
+import { getMarketingData } from "./marketing.js";
 import { getMonitoringData } from "./monitoring.js";
 import { getFinanceReport } from "./financeReport.js";
 import { getTaskPage } from "./taskPage.js";
@@ -279,54 +280,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         ]
       };
     }
-    case "marketing": {
-      const channel = statusFilter(query.channel);
-      const where = { organizationId, ...(channel ? { channel } : {}), ...(q ? { OR: [{ name: match }, { channel: match }] } : {}) };
-      const [campaigns, rows, total] = await Promise.all([
-        prisma.campaign.findMany({ where: { organizationId } }),
-        prisma.campaign.findMany({ where, orderBy: reportOrder<Prisma.CampaignOrderByWithRelationInput>(query.sort, {
-          name: { name: direction },
-          channel: { channel: direction },
-          clicks: { clicks: direction },
-          conversions: { conversions: direction }
-        }, { launchedAt: "desc" }, { id: "asc" }), skip, take }),
-        prisma.campaign.count({ where })
-      ]);
-      return {
-        id: dashboard,
-        title: "Marketing Performance",
-        description: "Campaign ROI, channel mix, conversion quality, and funnel efficiency.",
-        metrics: [
-          { label: "Spend", value: centsToCurrency(sum(campaigns, (c) => c.spendCents)), format: "currency", tone: "amber" },
-          { label: "Revenue", value: centsToCurrency(sum(campaigns, (c) => c.revenueCents)), format: "currency", tone: "emerald" },
-          { label: "Clicks", value: sum(campaigns, (c) => c.clicks), tone: "sky" },
-          { label: "CVR", value: `${percent(sum(campaigns, (c) => c.conversions), sum(campaigns, (c) => c.clicks))}%`, tone: "violet" }
-        ],
-        charts: [
-          { name: "Revenue by channel", unit: "USD", filterKey: "channel", type: "bar", xKey: "channel", yKeys: ["revenue"], data: categories(campaigns, (c) => c.channel).map((c) => ({ channel: c, revenue: centsToCurrency(sum(campaigns.filter((x) => x.channel === c), (x) => x.revenueCents)) })) },
-          { name: "Clicks by launch month", type: "line", xKey: "month", yKeys: ["clicks"], data: timeSeries(campaigns.map((c) => ({ date: c.launchedAt, volume: c.clicks }))).map((row) => ({ month: row.month, clicks: row.volume })) }
-        ],
-        table: {
-          title: "Campaign scorecard",
-          columns: [
-            { key: "name", label: "Campaign" },
-            { key: "channel", label: "Channel" },
-            { key: "clicks", label: "Clicks", type: "number" },
-            { key: "conversions", label: "Conversions", type: "number" },
-            { key: "roi", label: "ROI", sortable: false, type: "percent" }
-          ],
-          rows: rows.map((c) => ({ id: c.id, name: c.name, channel: c.channel, clicks: c.clicks, conversions: c.conversions, roi: percent(c.revenueCents - c.spendCents, c.spendCents) })),
-          pagination: pagination(page, pageSize, total)
-        },
-        filters: [
-          { key: "channel", label: "Channel", options: ["all", ...categories(campaigns, (c) => c.channel)].map((v) => ({ label: v, value: v })) }
-        ],
-        widgets: [
-          { title: "Total conversions", value: String(sum(campaigns, (c) => c.conversions)), detail: "Conversions reported by all campaigns." },
-          { title: "Campaigns", value: String(campaigns.length), detail: "Campaigns included in the scorecard." }
-        ]
-      };
-    }
+    case "marketing": return getMarketingData(organizationId, query);
     case "monitoring": return getMonitoringData(organizationId, query);
     case "crm": {
       const stage = statusFilter(query.stage ?? query.status);

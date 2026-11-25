@@ -182,7 +182,7 @@ export function DashboardPage() {
       </div><p className="text-xs text-zinc-500 dark:text-zinc-400">{data.periodLabel}{selectedPeriod && " · vs previous period"}</p>
     </div>}
     {(dashboardId === "finance" || dashboardId === "monitoring") && <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
-      <p>{data.periodLabel}</p>
+      <p className="min-w-0 [overflow-wrap:anywhere]">{data.periodLabel}</p>
       {dashboardId === "monitoring" && params.get("service") && <Button size="sm" variant="secondary" onClick={() => change({ service: "", page: "" })}>Show all services</Button>}
     </div>}
     <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{data.metrics.map((metric) => {

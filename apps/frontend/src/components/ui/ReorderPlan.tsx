@@ -31,7 +31,7 @@ export function ReorderPlan({ scope, onClose }: { scope: string; onClose: () => 
       {!valid && <p role="alert" className="text-sm text-rose-600">Choose a whole number from 1 to 10,000.</p>}
       <div className="grid min-w-0 gap-1 text-sm font-semibold">
         <label htmlFor="reorder-warehouse">Warehouse</label>
-        <select id="reorder-warehouse" value={warehouse} onChange={(e) => setWarehouse(e.target.value)} className="rounded border bg-white p-2 dark:bg-zinc-950">
+        <select id="reorder-warehouse" value={warehouse} onChange={(e) => setWarehouse(e.target.value)} className="w-full min-w-0 max-w-full rounded border bg-white p-2 dark:bg-zinc-950">
           <option value="">All warehouses</option>
           {[...new Set((data ?? []).map((r) => String(r.warehouse)))].sort().map((name) => <option key={name}>{name}</option>)}
         </select>

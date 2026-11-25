@@ -47,9 +47,9 @@ export function DataTable({ data, actions, navigation, params, change, onOpen, o
           <Input type="search" className="pl-9" value={search} placeholder={columns.filter((c) => (data.table.searchFields ?? reportSearchFields[data.id]).includes(c.key)).map((c) => c.label).join(", ")} maxLength={150}
             onChange={(e) => change({ search: e.target.value, page: "" }, true)} /></span>
         </label>
-        {data.filters.map(({ key, label, options }) => <div key={key} className="grid min-w-0 gap-1 text-xs font-semibold"><label htmlFor={filterId + key}>{label}</label>
+        {data.filters.map(({ key, label, options }) => <div key={key} className="grid min-w-0 max-w-full gap-1 text-xs font-semibold sm:max-w-80"><label htmlFor={filterId + key}>{label}</label>
           <select id={filterId + key} value={params.get(key) ?? options[0]?.value} onChange={(e) => change({ [key]: e.target.value === options[0]?.value ? "" : e.target.value, page: "" })}
-            className="h-10 max-w-full rounded-md border border-zinc-200 bg-white px-2 text-sm dark:border-zinc-800 dark:bg-zinc-950">
+            className="h-10 w-full min-w-0 max-w-full rounded-md border border-zinc-200 bg-white px-2 text-sm dark:border-zinc-800 dark:bg-zinc-950">
             {options.map(({ value, label }) => <option key={value} value={value}>{key === "service" || key === "aging" ? label : value === "all" ? "All" : titleCase(label)}</option>)}
           </select></div>)}
         {hasFilters && <Button variant="ghost" size="sm" onClick={clear}>Clear filters</Button>}

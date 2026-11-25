@@ -2,6 +2,7 @@ import { Router } from "express";
 import { ledgerDashboards } from "@saas-kit/shared";
 import { getFinanceLedger } from "../services/financeReport.js";
 import { getInventoryLedger } from "../services/inventoryLedger.js";
+import { getCampaignLedger } from "../services/marketing.js";
 import { getMonitoringLedger } from "../services/monitoring.js";
 import { utcDay } from "../services/receivables.js";
 import { z } from "zod";
@@ -53,8 +54,8 @@ dashboardRouter.get("/:dashboard/records", validate(ledgerSchema), async (req, r
       const today = utcDay(new Date());
       res.json({ table: await getFinanceLedger(org, req.query, today), periodLabel: today.toISOString().slice(0, 10) });
     } else {
-      const ledger = dashboard === "inventory" ? getInventoryLedger : getMonitoringLedger;
-      res.json({ table: await ledger(org, req.query) });
+      const ledgers = { inventory: getInventoryLedger, marketing: getCampaignLedger, monitoring: getMonitoringLedger };
+      res.json({ table: await ledgers[dashboard](org, req.query) });
     }
   } catch (error) { next(error); }
 });

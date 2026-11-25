@@ -31,7 +31,7 @@ GitHub Pages serves fictional snapshots and keeps task changes and saved views i
 - Finance / Billing: transaction and invoice ledgers, receivable balances by days past due, and filtered CSV exports
 - Inventory: stock levels, warehouses, reorder alerts
 - Project Management: task board, priority mix, assignments
-- Marketing: campaign ROI, clicks, conversions, channel comparison
+- Marketing: rank campaign ROI, inspect recorded spend and revenue, and compare acquisition channels
 - System Monitoring: service-level events and error rates, average and P95 latency, and drill-downs to individual logs
 - CRM: leads, contacts, deal pipeline, forecast widgets
 - AI / Insights: recommendation scores and an adjustable monthly booked-revenue scenario with CSV export
@@ -87,7 +87,7 @@ GitHub Pages serves fictional snapshots and keeps task changes and saved views i
 - `DELETE /api/users/:id`
 - `GET /api/organizations/current`
 - `GET /api/dashboard-data/:dashboard`
-- `GET /api/dashboard-data/:dashboard/records` for Finance, Inventory, and Monitoring ledger pages
+- `GET /api/dashboard-data/:dashboard/records` for Finance, Inventory, Marketing, and Monitoring ledger pages
 - `GET /api/logs`
 - `GET /api/transactions`
 

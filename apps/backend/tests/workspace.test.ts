@@ -168,11 +168,34 @@ test("authenticated workspace reporting and task workflow", async (t) => {
     assert.equal(empty.metrics[0].value, 0);
     assert.equal(empty.table.pagination.total, 0);
   });
+  await t.test("campaign returns preserve zero spend, losses and the ranking across pages", async () => {
+    for (const [name, spendCents, revenueCents] of [
+      ["Organic 100%", 0, 555], ["Loss", 2000, 1600], ["Break even", 1000, 1000], ["Winner", 2500, 6250]
+    ] as const) {
+      await prisma.campaign.create({data: {organizationId, name, channel: "Email", clicks: 0, conversions: 0,
+        spendCents, revenueCents, status: "active", launchedAt: new Date("2026-05-10T12:00:00Z")}});
+    }
+    const path = "/dashboard-data/marketing";
+    const report = await (await request(path + "?sort=roi&direction=desc", member.accessToken)).json();
+    assert.deepEqual(report.table.rows.map((r: {roi: number | null}) => r.roi), [150, 0, -20, null]);
+    assert.deepEqual(report.metrics.map((m: {value: unknown}) => m.value), [55, 94.05, 0, "—"]);
+    assert.equal(report.widgets[0].value, "71%");
+    const low = await (await request(path + "/records?sort=roi&pageSize=2&page=2", member.accessToken)).json();
+    assert.deepEqual(low.table.rows.map((r: {name: string}) => r.name), ["Winner", "Organic 100%"]);
+    const exact = await (await request(path + "?search=%25&channel=Email", member.accessToken)).json();
+    assert.equal(exact.table.pagination.total, 1);
+    assert.equal(exact.table.rows[0].spend, 0);
+    assert.equal(exact.table.rows[0].revenue, 5.55);
+    assert.equal(exact.table.rows[0].roi, null);
+    const empty = await (await request(path, other.accessToken)).json();
+    assert.equal(empty.table.pagination.total, 0);
+    assert.equal(empty.widgets[0].value, "—");
+  });
   await t.test("bulk ledger pages match the report and retain its workspace and filter scope", async () => {
     for (const [dashboard, query] of [
       ["finance", "ledger=invoices&aging=past-due&sort=balance&direction=desc&pageSize=2&page=2"],
       ["finance", "status=paid"], ["monitoring", "service=edge-API&level=error&sort=latencyMs&direction=desc&pageSize=1&page=2"],
-      ["inventory", "status=low&sort=sku&pageSize=2&page=2"]
+      ["inventory", "status=low&sort=sku&pageSize=2&page=2"], ["marketing", "channel=Email&sort=roi&direction=desc&pageSize=2&page=2"]
     ]) {
       const path = "/dashboard-data/" + dashboard;
       for (const auth of [member.accessToken, other.accessToken]) {

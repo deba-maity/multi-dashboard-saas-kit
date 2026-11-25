@@ -20,6 +20,7 @@ const reports: Array<{id: DashboardId; label: string; keywords: string; query: s
   {id: "projects", label: "Task board", keywords: "kanban tasks project delivery", query: "?layout=board"},
   {id: "inventory", label: "Low-stock items", keywords: "low stock reorder inventory warehouse", query: "?status=low&view=records"},
   {id: "monitoring", label: "Service errors", keywords: "errors logs incidents monitoring", query: "?level=error&view=records"},
+  {id: "marketing", label: "Campaign returns", keywords: "marketing acquisition roi spend return on investment", query: "?sort=roi&direction=desc&view=records"},
   {id: "insights", label: "Booked revenue scenario", keywords: "revenue forecast scenario what if simulation", query: "?view=scenario"}
 ];
 const destinations = [...workspaces, ...reports.map((report) => ({...report, icon: dashboards.find((d) => d.id === report.id)!.icon}))];
