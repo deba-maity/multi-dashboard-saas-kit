@@ -140,7 +140,7 @@ async function main() {
         invoiceNumber: `INV-${String(2400 + i).padStart(5, "0")}`,
         amountCents: cents(pick([1299, 2400, 399, 819, 5200], i)),
         status: pick(["paid", "open", "overdue"], i),
-        dueDate: daysAgo(35 - i)
+        dueDate: daysAgo(pick([-14, 0, 7, 17, 32, 45, 60, 61, 90, 91, 112], i))
       }
     });
   }

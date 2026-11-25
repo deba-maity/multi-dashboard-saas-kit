@@ -1,6 +1,10 @@
 import type { TableColumn } from "@saas-kit/shared";
-const dollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 0, maximumFractionDigits: 2 });
-export const currency = (value: unknown) => dollars.format(Number(value ?? 0));
+const wholeDollars = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+const dollarsAndCents = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+export const currency = (value: unknown) => {
+  const number = Number(value ?? 0);
+  return (Number.isInteger(number) ? wholeDollars : dollarsAndCents).format(number);
+};
 export const compact = (value: unknown) => new Intl.NumberFormat("en-US", { notation: "compact" }).format(Number(value ?? 0));
 export const titleCase = (value: string) => value.toLowerCase().replace(/^todo$/, "to do").replace(/[-_]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 export function cellText(column: TableColumn, value: unknown) {

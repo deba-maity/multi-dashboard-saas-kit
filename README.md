@@ -12,6 +12,8 @@ Northstar is a multi-tenant reporting workspace with ten dashboards, a React fro
 2. Open **Review blocked tasks**, choose a task, change its status to **In progress**, and save. The task leaves the blocked queue and the status totals update. **Reset sample tasks** restores the starting board.
 3. In Inventory, choose **Low** under the reorder chart. Save the view, copy the filtered link, or export the matching SKUs to CSV.
 
+In **Finance**, select **Past-due invoices** to see the balances behind the count. In **AI Insights**, move **Change from booked revenue** to compare each month with your assumption. **Ctrl+K** (or **⌘K**) opens report search.
+
 GitHub Pages serves fictional snapshots and keeps task changes and saved views in the current browser. The full-stack app authenticates users and persists task status in PostgreSQL. Shared links preserve the report settings. They do not transfer browser-local task edits.
 
 ## Stack
@@ -26,13 +28,13 @@ GitHub Pages serves fictional snapshots and keeps task changes and saved views i
 - Analytics: KPIs, revenue trend, order volume, period comparisons
 - E-commerce: orders, products, fulfillment status, channel revenue
 - User Management: members, roles, statuses, protected CRUD invitation flow
-- Finance / Billing: transaction ledger, invoice aging, payment status
+- Finance / Billing: transaction and invoice ledgers, receivable balances by days past due, and filtered CSV exports
 - Inventory: stock levels, warehouses, reorder alerts
 - Project Management: task board, priority mix, assignments
 - Marketing: campaign ROI, clicks, conversions, channel comparison
-- System Monitoring: logs, service health, error and latency views
+- System Monitoring: service-level events and error rates, average and P95 latency, and drill-downs to individual logs
 - CRM: leads, contacts, deal pipeline, forecast widgets
-- AI / Insights: recommendations, sample recommendation scores and a revenue scenario
+- AI / Insights: recommendation scores and an adjustable monthly booked-revenue scenario with CSV export
 
 ## Quick Start
 
@@ -85,6 +87,7 @@ GitHub Pages serves fictional snapshots and keeps task changes and saved views i
 - `DELETE /api/users/:id`
 - `GET /api/organizations/current`
 - `GET /api/dashboard-data/:dashboard`
+- `GET /api/dashboard-data/:dashboard/records` for Finance, Inventory, and Monitoring ledger pages
 - `GET /api/logs`
 - `GET /api/transactions`
 

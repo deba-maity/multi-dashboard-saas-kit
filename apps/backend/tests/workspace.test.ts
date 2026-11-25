@@ -73,6 +73,79 @@ test("authenticated workspace reporting and task workflow", async (t) => {
     assert.equal(empty.table.pagination.total, 0);
     assert.equal(empty.metrics[0].value, 0);
   });
+  await t.test("the revenue scenario uses monthly booked cents and excludes other workspaces", async () => {
+    const org = other.organization.id;
+    const createdAt = new Date("2025-12-01T00:00:00Z");
+    await prisma.order.createMany({ data: [
+      {organizationId: org, createdAt, customerName: "A", totalCents: 1299, status: "paid", channel: "Web"},
+      {organizationId: org, createdAt, customerName: "B", totalCents: 125, status: "shipped", channel: "Web"},
+      {organizationId: org, createdAt, customerName: "C", totalCents: 9999, status: "pending", channel: "Web"},
+      {organizationId: org, createdAt: new Date("2026-01-01T00:00:00Z"), customerName: "D", totalCents: 8888, status: "refunded", channel: "Web"}
+    ] });
+    const report = await (await request("/dashboard-data/insights", other.accessToken)).json();
+    const data = report.charts.find((c: {kind: string}) => c.kind === "booked-revenue-scenario").data;
+    assert.deepEqual(data, [{month: "Dec 2025", booked: 14.24, scenario: 15.95}, {month: "Jan 2026", booked: 0, scenario: 0}]);
+  });
+  await t.test("aging balances and invoice drill-downs agree across UTC day boundaries", async () => {
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    const due = (age: number) => new Date(today.getTime() - age * 86400000 + 86399999);
+    const ages = [-10, 0, 1, 30, 31, 60, 61, 90, 91];
+    await prisma.invoice.createMany({ data: ages.map((age, index) => ({
+      organizationId, invoiceNumber: "DUE-" + index, customerName: index % 2 ? "Blue" : "Amber",
+      amountCents: 1000 + index, status: index % 2 ? "overdue" : "open", dueDate: due(age)
+    })) });
+    for (const [owner, status] of [[organizationId, "paid"], [organizationId, "void"], [other.organization.id, "open"]]) {
+      await prisma.invoice.create({ data: { organizationId: owner, invoiceNumber: "OTHER-" + status, customerName: "Other",
+        status, amountCents: 49999, dueDate: due(120) } });
+    }
+    const path = "/dashboard-data/finance";
+    const finance = await (await request(path, member.accessToken)).json();
+    const buckets = finance.charts.find((chart: {filterKey?: string}) => chart.filterKey === "aging").data;
+    assert.deepEqual(buckets.map((row: {count: number}) => row.count), [2, 2, 2, 2, 1]);
+    assert.deepEqual(buckets.map((row: {balance: number}) => Math.round(row.balance * 100)), [2001, 2005, 2009, 2013, 1008]);
+    assert.equal(finance.metrics.find((m: {label: string}) => m.label === "Past-due invoices").value, 7);
+    assert.equal(finance.metrics.find((m: {label: string}) => m.label === "Paid invoices").value, 1);
+    const invoices = path + "?ledger=invoices";
+    const pastDue = await (await request(invoices + "&aging=past-due", member.accessToken)).json();
+    assert.equal(pastDue.table.pagination.total, 7);
+    assert.ok(pastDue.table.rows.every((row: {daysPastDue: number}) => row.daysPastDue > 0));
+    const unknownBand = await (await request(invoices + "&aging=retired-filter", member.accessToken)).json();
+    assert.equal(unknownBand.table.pagination.total, 0);
+    for (const [index, band] of ["current", "1-30", "31-60", "61-90", "91-plus"].entries()) {
+      const r = await (await request(invoices + "&aging=" + band, member.accessToken)).json();
+      assert.equal(r.table.pagination.total, buckets[index].count);
+      assert.equal(r.table.rows.reduce((sum: number, row: {balance: number}) => sum + Math.round(row.balance * 100), 0),
+        Math.round(buckets[index].balance * 100));
+      assert.ok(r.table.rows.every((row: {aging: string}) => row.aging === band));
+    }
+    const page = await (await request(invoices + "&search=amber&pageSize=2&page=2&sort=balance&direction=desc", member.accessToken)).json();
+    assert.equal(page.table.pagination.total, 5);
+    assert.deepEqual(page.table.rows.map((row: {invoiceNumber: string}) => row.invoiceNumber), ["DUE-4", "DUE-2"]);
+    const isolated = await (await request(invoices, other.accessToken)).json();
+    assert.deepEqual(isolated.table.rows.map((row: {invoiceNumber: string}) => row.invoiceNumber), ["OTHER-open"]);
+  });
+  await t.test("service latency uses the event distribution and preserves level filters on the ledger", async () => {
+    const logs = Array.from({length: 20}, (_, i) => ({ organizationId, service: "edge-API", level: i > 16 ? "error" : "info",
+      message: "Edge request " + i, latencyMs: i === 19 ? 3000 : (i + 1) * 10 }));
+    await prisma.systemLog.createMany({ data: [...logs,
+      { organizationId, service: "all", level: "warn", message: "Live service named all", latencyMs: 42 },
+      { organizationId: other.organization.id, service: "edge-API", level: "error", message: "Elsewhere", latencyMs: 9999 }] });
+    const path = "/dashboard-data/monitoring";
+    const overall = await (await request(path, member.accessToken)).json();
+    assert.deepEqual(overall.metrics.map((m: {value: unknown}) => m.value), [21, 3, "190 ms", 2]);
+    const scoped = await (await request(path + "?service=edge-API&level=error&sort=latencyMs&direction=desc&pageSize=1", member.accessToken)).json();
+    assert.deepEqual(scoped.metrics.map((m: {value: unknown}) => m.value), [20, 3, "190 ms", 1]);
+    assert.equal(scoped.table.pagination.total, 3);
+    assert.equal(scoped.table.rows[0].latencyMs, 3000);
+    assert.equal(scoped.widgets[0].value, "15%");
+    assert.deepEqual(scoped.charts[1].data.find((s: {service: string}) => s.service === "edge-API"), {service: "edge-API", average: 245, p95: 190});
+    const literal = await (await request(path + "?service=all", member.accessToken)).json();
+    assert.equal(literal.table.pagination.total, 1);
+    assert.equal(literal.table.rows[0].level, "warn");
+    const missing = await (await request(path + "?service=retired", member.accessToken)).json();
+    assert.deepEqual(missing.metrics.map((m: {value: unknown}) => m.value), [0, 0, "—", 0]);
+  });
   await t.test("inventory totals span the workspace and the reorder preview stays bounded", async () => {
     for (let index = 0; index < 8; index++) {
       const stock = index;
@@ -94,6 +167,23 @@ test("authenticated workspace reporting and task workflow", async (t) => {
     assert.deepEqual(empty.charts[0].data, []);
     assert.equal(empty.metrics[0].value, 0);
     assert.equal(empty.table.pagination.total, 0);
+  });
+  await t.test("bulk ledger pages match the report and retain its workspace and filter scope", async () => {
+    for (const [dashboard, query] of [
+      ["finance", "ledger=invoices&aging=past-due&sort=balance&direction=desc&pageSize=2&page=2"],
+      ["finance", "status=paid"], ["monitoring", "service=edge-API&level=error&sort=latencyMs&direction=desc&pageSize=1&page=2"],
+      ["inventory", "status=low&sort=sku&pageSize=2&page=2"]
+    ]) {
+      const path = "/dashboard-data/" + dashboard;
+      for (const auth of [member.accessToken, other.accessToken]) {
+        const full = await (await request(path + "?" + query, auth)).json();
+        const response = await request(path + "/records?" + query, auth);
+        assert.equal(response.status, 200);
+        const page = await response.json();
+        assert.deepEqual(page.table, full.table);
+        assert.ok(!("charts" in page) && !("metrics" in page));
+      }
+    }
   });
   await t.test("members can read tasks and admins can update the project summary", async () => {
     const report = await (await request("/dashboard-data/projects?status=blocked", member.accessToken)).json();

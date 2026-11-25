@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowUpRight, Plus, RotateCcw } from "lucide-react";
-import type { DashboardId } from "@saas-kit/shared";
+import { invoiceAgeFilter, type ChartSeries, type DashboardId } from "@saas-kit/shared";
 import { api, ApiError } from "../lib/api";
 import { isDemo, resetDemoTasks } from "../lib/demo";
 import { loadReport, downloadReport } from "../lib/report";
 import { dashboards } from "../lib/dashboards";
 import { Button } from "../components/ui/Button";
+import { RevenueScenario } from "../components/ui/RevenueScenario";
 import { ChartCard } from "../components/ui/ChartCard";
 import { SavedViews } from "../components/ui/SavedViews";
 import { DataTable } from "../components/ui/DataTable";
@@ -28,13 +29,19 @@ export function DashboardPage() {
   const client = useQueryClient();
   const toast = useToast();
   const [params, setParams] = useSearchParams();
+  const invoiceLedger = dashboardId === "finance" && params.get("ledger") === "invoices";
+  const period = params.get("period");
+  const selectedPeriod = period === "30" || period === "90" ? period : "";
   const board = dashboardId === "projects" && params.get("layout") === "board";
   const [row, setRow] = useState<Record<string, unknown> | null>(null);
-  const [exporting, setExporting] = useState(false);
+  const exportRequest = useRef<AbortController | null>(null);
+  const [exportProgress, setExportProgress] = useState<string | null>(null);
+  useEffect(() => { setRow(null); }, [invoiceLedger]);
   const [planning, setPlanning] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const focusTable = params.get("view") === "records";
-  const scrolled = useRef(false);
+  const targetSection = params.get("view") === "records" ? "report-table" :
+    dashboardId === "insights" && params.get("view") === "scenario" ? "revenue-scenario" : null;
+  const scrolled = useRef<string | null>(null);
   const search = params.get("search") ?? "";
   const [settledSearch, setSettledSearch] = useState(search);
   useEffect(() => {
@@ -46,26 +53,36 @@ export function DashboardPage() {
   else query.delete("search");
   query.delete("view");
   query.delete("layout");
+  query.delete("scenario");
+  if (dashboardId === "analytics" && !selectedPeriod) query.delete("period");
   query.set("pageSize", "10");
   const page = Math.max(1, Math.min(100000, Math.floor(Number(params.get("page"))) || 1));
   query.set("page", board ? "1" : String(page));
   const { data, error, isFetching, isPlaceholderData, refetch } = useQuery({
-    queryKey: ["dashboard", dashboardId, scope, query.toString()],
-    queryFn: () => loadReport(dashboardId, query),
-    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[2] === scope ? previous : undefined
+    queryKey: ["dashboard", dashboardId, scope, invoiceLedger ? "invoices" : "report", query.toString()],
+    queryFn: ({signal}) => loadReport(dashboardId, query, signal),
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[2] === scope && previousQuery.queryKey[3] === (invoiceLedger ? "invoices" : "report") ? previous : undefined
   });
+  const exportParams = new URLSearchParams(params);
+  for (const key of ["view", "page", "pageSize", "scenario"]) exportParams.delete(key);
+  const exportKey = exportParams.toString();
+  useEffect(() => () => exportRequest.current?.abort(), [dashboardId, scope, exportKey]);
   const ready = !!data;
   useEffect(() => {
-    if (!focusTable) window.scrollTo(0, 0);
-  }, [dashboardId, focusTable]);
+    if (!targetSection) window.scrollTo(0, 0);
+  }, [dashboardId, targetSection]);
   useEffect(() => {
     document.title = (data?.title ?? "Dashboard") + " · Northstar";
-    if (ready && focusTable && !scrolled.current) {
-      document.getElementById("report-table")?.scrollIntoView({ block: "start" });
-      scrolled.current = true;
+    if (!targetSection) scrolled.current = null;
+    else if (ready && scrolled.current !== targetSection) {
+      const section = document.getElementById(targetSection);
+      if (section) {
+        section.scrollIntoView({block: "start"});
+        section.focus({preventScroll: true});
+        scrolled.current = targetSection;
+      }
     }
-    if (!focusTable) scrolled.current = false;
-  }, [ready, focusTable, data?.title]);
+  }, [ready, targetSection, data?.title]);
   useEffect(() => {
     if (board || !data || isPlaceholderData || page <= data.table.pagination.pageCount) return;
     const fixed = new URLSearchParams(params);
@@ -88,6 +105,11 @@ export function DashboardPage() {
     }
     setParams(next, { replace, preventScrollReset: true });
   }
+  function selectLedger(invoices: boolean, aging = "", jumpToRecords = false) {
+    change({ ledger: invoices ? "invoices" : "", status: "", aging, search: "", sort: "", direction: "", page: "",
+      ...(jumpToRecords && { view: "records" }) });
+    if (jumpToRecords) document.getElementById("report-table")?.scrollIntoView({ block: "start" });
+  }
   async function refresh() { await client.invalidateQueries({ queryKey: ["dashboard", dashboardId, scope] }); }
   async function reset() {
     setResetting(true);
@@ -99,10 +121,19 @@ export function DashboardPage() {
     finally { setResetting(false); }
   }
   async function exportCsv() {
-    setExporting(true);
-    try { await downloadReport(dashboardId, query); }
-    catch { toast.push({ title: "Export failed", message: "Please try again." }); }
-    finally { setExporting(false); }
+    if (exportRequest.current) return;
+    const request = new AbortController();
+    exportRequest.current = request;
+    setExportProgress("Preparing CSV…");
+    try {
+      await downloadReport(dashboardId, query, request.signal, (loaded, total) => setExportProgress(loaded + " of " + total + " records"));
+    } catch (error) {
+      if (!request.signal.aborted && !(error instanceof DOMException && error.name === "AbortError"))
+        toast.push({ title: "Export failed", message: error instanceof Error ? error.message : "Please try again." });
+    } finally {
+      exportRequest.current = null;
+      setExportProgress(null);
+    }
   }
   const transientFailure = error instanceof TypeError || (error instanceof ApiError &&
     (error.status >= 500 || error.status === 408 || error.status === 429));
@@ -110,6 +141,23 @@ export function DashboardPage() {
   if (error && !showLastReport) return <div role="alert" className="grid justify-items-start gap-3 rounded-lg border p-4">
     <p>{error instanceof Error ? error.message : "Unable to load dashboard."}</p><Button onClick={() => refetch()}>Retry</Button></div>;
   if (!data) return <p role="status" className="py-12 text-zinc-500">Loading report…</p>;
+  const filters = data.filters;
+  const scenario = data.charts.find((chart) => chart.kind === "booked-revenue-scenario");
+  function reportChart(chart: ChartSeries) {
+    const invoiceAging = dashboardId === "finance" && chart.filterKey === "aging";
+    const filter = invoiceAging ? invoiceAgeFilter : filters.find(({ key }) => chart.filterKey === key);
+    function drill(category: string) {
+      if (!filter) return;
+      const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const option = filter.options.find((item) => item.value === category || item.label === category)
+        ?? filter.options.find((item) => normalize(item.value) === normalize(category));
+      if (!option) return;
+      if (invoiceAging && !invoiceLedger) { selectLedger(true, option.value, true); return; }
+      change({ [filter.key]: option.value, page: "", search: "", view: "records" });
+      document.getElementById("report-table")?.scrollIntoView({ block: "start" });
+    }
+    return <ChartCard key={chart.name} chart={chart} drill={filter ? drill : undefined} />;
+  }
   const queues = [
     { label: "Review pending orders", to: "ecommerce?status=pending" },
     { label: "Review blocked tasks", to: "projects?status=blocked" },
@@ -130,10 +178,23 @@ export function DashboardPage() {
     {dashboardId === "analytics" && <div className="flex flex-wrap items-center justify-between gap-2">
       <div role="group" aria-label="Reporting period" className="inline-flex gap-1 rounded-lg border border-zinc-200 bg-white p-1 dark:border-zinc-700 dark:bg-zinc-950">
         {[["", "All time"], ["30", "30 days"], ["90", "90 days"]].map(([period, label]) =>
-          <button key={label} aria-pressed={(params.get("period") ?? "") === period} onClick={() => change({ period, page: "" })} className="rounded-md px-3 py-1.5 text-sm font-semibold aria-pressed:bg-emerald-800 aria-pressed:text-white">{label}</button>)}
-      </div><p className="text-xs text-zinc-500 dark:text-zinc-400">{data.periodLabel}{params.get("period") && " · vs previous period"}</p>
+          <button key={label} aria-pressed={selectedPeriod === period} onClick={() => change({ period, page: "" })} className="rounded-md px-3 py-1.5 text-sm font-semibold aria-pressed:bg-emerald-800 aria-pressed:text-white">{label}</button>)}
+      </div><p className="text-xs text-zinc-500 dark:text-zinc-400">{data.periodLabel}{selectedPeriod && " · vs previous period"}</p>
     </div>}
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{data.metrics.map((metric) => <StatCard key={metric.label} metric={metric} />)}</div>
+    {(dashboardId === "finance" || dashboardId === "monitoring") && <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600 dark:text-zinc-400">
+      <p>{data.periodLabel}</p>
+      {dashboardId === "monitoring" && params.get("service") && <Button size="sm" variant="secondary" onClick={() => change({ service: "", page: "" })}>Show all services</Button>}
+    </div>}
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{data.metrics.map((metric) => {
+      const drill = metric.drill;
+      return <StatCard key={metric.label} metric={metric} onDrill={drill ? () => {
+        if (drill.params.ledger === "invoices" && !invoiceLedger) selectLedger(true, drill.params.aging, true);
+        else {
+          change({ layout: "", page: "", search: "", view: "records", ...drill.params });
+          document.getElementById("report-table")?.scrollIntoView({ block: "start" });
+        }
+      } : undefined} />;
+    })}</div>
     {dashboardId === "analytics" && <nav aria-label="Review queues" className="flex flex-wrap gap-2">
       {queues.map(({ label, to }) => <Link key={to} to={"/dashboards/" + to + "&view=records"} className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-sm font-medium text-emerald-800 hover:bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">{label}<ArrowUpRight size={14} /></Link>)}
     </nav>}
@@ -146,19 +207,13 @@ export function DashboardPage() {
       <SavedViews key={scope + dashboardId} scope={scope} dashboard={dashboardId} />
       <TaskBoard scope={scope} search={settledSearch} onOpen={setRow} />
     </section> : <>
-    <div className="grid min-w-0 gap-4 xl:grid-cols-2">{data.charts.map((chart) => {
-      const filter = data.filters.find(({ key }) => chart.filterKey === key);
-      function drill(category: string) {
-        if (!filter) return;
-        const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-        const option = filter.options.find((item) => normalize(item.value) === normalize(category));
-        if (!option) return;
-        change({ [filter.key]: option.value, page: "", search: "", view: "records" });
-        document.getElementById("report-table")?.scrollIntoView({ block: "start" });
-      }
-      return <ChartCard key={chart.name} chart={chart} drill={filter ? drill : undefined} />;
-    })}</div>
-    <DataTable data={data} actions={<SavedViews key={scope + dashboardId} scope={scope} dashboard={dashboardId} />} params={params} change={change} onOpen={setRow} onExport={exportCsv} exporting={exporting} fetching={isFetching || settledSearch !== search} />
+    {scenario ? <RevenueScenario chart={scenario} assumption={params.get("scenario")} onChange={(value) => change({scenario: value}, true)}>
+      {data.charts.filter((chart) => chart !== scenario).map(reportChart)}
+    </RevenueScenario> : <div className="grid min-w-0 gap-4 xl:grid-cols-2">{data.charts.map(reportChart)}</div>}
+    <DataTable data={data} navigation={dashboardId === "finance" && <nav aria-label="Finance ledger" className="flex flex-wrap gap-1 border-b border-zinc-200 p-2 dark:border-zinc-800">
+      <Button size="sm" variant={invoiceLedger ? "ghost" : "primary"} aria-pressed={!invoiceLedger} onClick={() => { if (invoiceLedger) selectLedger(false); }}>Transactions</Button>
+      <Button size="sm" variant={invoiceLedger ? "primary" : "ghost"} aria-pressed={invoiceLedger} onClick={() => { if (!invoiceLedger) selectLedger(true); }}>Outstanding invoices</Button>
+    </nav>} actions={<SavedViews key={scope + dashboardId} scope={scope} dashboard={dashboardId} />} params={params} change={change} onOpen={setRow} onExport={exportCsv} exportProgress={exportProgress} onCancelExport={() => exportRequest.current?.abort()} fetching={isFetching || settledSearch !== search} />
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">{data.widgets.map((widget) => <article key={widget.title} className="min-w-0 [overflow-wrap:anywhere] border-l-2 border-emerald-500 px-4">
       <h2 className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{widget.title}</h2><p className="mt-1 font-semibold">{widget.value}</p>
       <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{widget.detail}</p></article>)}</div>

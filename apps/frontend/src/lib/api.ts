@@ -92,8 +92,13 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
     response = await request(path, options, token);
   }
   if (response.status === 204) return undefined as T;
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(response.status, payload.message ?? "Request failed", payload.details);
+  let payload;
+  try { payload = await response.json(); }
+  catch (error) {
+    if (options.signal?.aborted) throw error;
+    throw new ApiError(response.ok ? 502 : response.status, response.ok ? "The server returned an unreadable response. Please retry." : "Request failed");
+  }
+  if (!response.ok) throw new ApiError(response.status, payload?.message ?? "Request failed", payload?.details);
   return payload as T;
 }
 

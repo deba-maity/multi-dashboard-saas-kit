@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { downloadWorksheet, loadReport } from "../../lib/report";
+import { downloadWorksheet, reportPages } from "../../lib/report";
 import { Button } from "./Button";
 import { FormField } from "./FormField";
 import { Modal } from "./Modal";
@@ -10,14 +10,10 @@ export function ReorderPlan({ scope, onClose }: { scope: string; onClose: () => 
   const [warehouse, setWarehouse] = useState("");
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["reorder-plan", scope],
-    queryFn: async () => {
-      const params = new URLSearchParams({ status: "low", pageSize: "50", sort: "sku" });
-      const first = (await loadReport("inventory", params)).table;
-      const rows = [...first.rows];
-      for (let page = 2; page <= first.pagination.pageCount; page++) {
-        params.set("page", String(page));
-        rows.push(...(await loadReport("inventory", params)).table.rows);
-      }
+    queryFn: async ({signal}) => {
+      const rows: Record<string, unknown>[] = [];
+      const params = new URLSearchParams({ status: "low", sort: "sku" });
+      for await (const page of reportPages("inventory", params, signal)) rows.push(...page.rows);
       return rows;
     }
   });

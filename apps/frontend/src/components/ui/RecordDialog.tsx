@@ -41,9 +41,10 @@ export function RecordDialog({ data, row, canManage, onClose, onRefresh }: {
       await onRefresh();
     } finally { setSaving(false); }
   }
-  return <Modal open title={data.id === "projects" ? String(row.title) : data.table.title + " record"} onClose={() => { if (!saving) onClose(); }}>
+  const recordTitle = data.id === "projects" ? row.title : data.table.recordKey ? row[data.table.recordKey] : null;
+  return <Modal open title={typeof recordTitle === "string" && recordTitle ? recordTitle : data.table.title + " record"} onClose={() => { if (!saving) onClose(); }}>
     <dl className="grid gap-3">{data.table.columns.map((column) => <div key={column.key} className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3 text-sm">
-      <dt className="text-zinc-500">{column.label}</dt><dd className="break-words font-medium">{cellText(column, editable && column.key === "status" ? previousStatus : row[column.key])}</dd>
+      <dt className="text-zinc-500">{column.label}</dt><dd className="min-w-0 [overflow-wrap:anywhere] font-medium">{cellText(column, editable && column.key === "status" ? previousStatus : row[column.key])}</dd>
     </div>)}</dl>
     {editable && <div className="mt-5 grid gap-3 border-t border-zinc-200 pt-4 dark:border-zinc-800">
       <label className="grid gap-1 text-sm font-semibold">Task status

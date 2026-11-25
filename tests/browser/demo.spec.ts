@@ -298,3 +298,180 @@ test("single-month series render an actual point and empty pie charts explain th
   await page.getByRole("button", { name: "View data for Activity status" }).click();
   await expect(page.getByRole("table", { name: "Activity status" }).getByRole("row")).toHaveCount(4);
 });
+
+test("aging chart, invoice detail, saved view and CSV agree after switching ledgers", async ({page, request}) => {
+  const snapshot = await (await request.get("./demo/finance-invoices.json")).json();
+  const expected = snapshot.table.rows.filter((row: {aging: string}) => row.aging === "31-60");
+  expect(expected.length).toBeGreaterThan(0);
+  await page.goto("./#/dashboards/finance?status=failed&sort=amount&direction=desc");
+  await page.getByRole("button", {name: "Show records for 31–60 days"}).click();
+  const ledger = page.getByRole("region", {name: "Outstanding invoices", exact: true});
+  await expect(ledger.getByLabel("Invoice age")).toHaveValue("31-60");
+  expect(page.url()).not.toContain("status=failed");
+  expect(page.url()).not.toContain("sort=amount");
+  await expect(ledger.locator("tbody tr")).toHaveCount(expected.length);
+  await ledger.getByRole("button", {name: expected[0].invoiceNumber}).click();
+  await expect(page.getByRole("dialog")).toContainText(expected[0].customerName);
+  await page.getByRole("button", {name: "Close dialog"}).click();
+  await page.getByRole("button", {name: "Save view", exact: true}).click();
+  await page.getByLabel("View name").fill("Collections");
+  await page.getByRole("button", {name: "Save report view", exact: true}).click();
+  await page.getByRole("button", {name: "Transactions", exact: true}).click();
+  await expect(page.getByRole("heading", {name: "Transaction ledger"})).toBeVisible();
+  await page.getByRole("button", {name: "Collections", exact: true}).click();
+  await page.reload();
+  await expect(ledger.getByLabel("Invoice age")).toHaveValue("31-60");
+  const download = page.waitForEvent("download");
+  await ledger.getByRole("button", {name: "Export CSV"}).click();
+  const csv = await download;
+  expect(csv.suggestedFilename()).toBe("northstar-outstanding-invoices.csv");
+  const text = await readFile((await csv.path())!, "utf8");
+  expect(text.trim().split(/\r?\n/)).toHaveLength(expected.length + 1);
+  for (const row of expected) expect(text).toContain('"' + row.invoiceNumber + '"');
+  await ledger.getByLabel("Search records").fill(expected[0].invoiceNumber);
+  await expect(ledger.locator("tbody tr")).toHaveCount(1);
+});
+
+test("service latency drill-down, severity, reload and export keep the selected service", async ({page, request}) => {
+  const report = await (await request.get("./demo/monitoring.json")).json();
+  const firstError = report.table.rows.find((r: {level: string}) => r.level === "error");
+  const service = firstError.service;
+  const events = report.table.rows.filter((r: {service: string}) => r.service === service);
+  const errors = events.filter((r: {level: string}) => r.level === "error");
+  const latencies = events.map((r: {latencyMs: number}) => r.latencyMs).sort((a: number, b: number) => a - b);
+  await page.goto("./#/dashboards/monitoring");
+  await page.getByRole("button", {name: "Show records for " + service, exact: true}).click();
+  const ledger = page.getByRole("region", {name: "Event log", exact: true});
+  await expect(ledger.getByLabel("Service", {exact: true})).toHaveValue(service);
+  await expect(page.getByText("Event metrics for " + service, {exact: true})).toBeVisible();
+  await expect(page.getByText(latencies[Math.ceil(latencies.length * .95) - 1] + " ms", {exact: true})).toBeVisible();
+  await ledger.getByLabel("Level", {exact: true}).selectOption("error");
+  await page.reload();
+  await expect(ledger.getByLabel("Level", {exact: true})).toHaveValue("error");
+  await expect(ledger.locator("tbody tr")).toHaveCount(Math.min(10, errors.length));
+  const dl = page.waitForEvent("download");
+  await ledger.getByRole("button", {name: "Export CSV"}).click();
+  const text = await readFile((await (await dl).path())!, "utf8");
+  expect(text.trim().split(/\r?\n/)).toHaveLength(errors.length + 1);
+  for (const record of errors) expect(text).toContain(record.message);
+  await page.getByRole("button", {name: "Show all services"}).click();
+  await expect(ledger.getByLabel("Service", {exact: true})).toHaveValue("");
+  await expect(ledger.getByLabel("Level", {exact: true})).toHaveValue("error");
+});
+
+test("the scenario starts from Analytics revenue and its assumption, totals and CSV agree", async ({page, request}) => {
+  const baseline = await (await request.get("./demo/analytics.json")).json();
+  const months = baseline.charts[0].data;
+  await page.goto("./#/dashboards/insights?scenario=-25");
+  const slider = page.getByRole("slider", {name: "Change from booked revenue"});
+  await expect(slider).toHaveValue("-25");
+  await page.getByRole("button", {name: "View data for Booked revenue scenario"}).click();
+  const table = page.getByRole("table", {name: "Booked revenue scenario"});
+  await expect(table.locator("tbody tr")).toHaveCount(months.length);
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", {name: "Export scenario CSV"}).click();
+  const file = await download;
+  expect(file.suggestedFilename()).toBe("northstar-revenue-scenario.csv");
+  const lines = (await readFile((await file.path())!, "utf8")).trim().split(/\r?\n/).slice(1);
+  expect(lines).toEqual(months.map((m: {period: string; revenue: number}) =>
+    [m.period, m.revenue, -25, Math.round(Math.round(m.revenue * 100) * .75) / 100].map(v => '"' + v + '"').join(",")));
+  await slider.press("Home");
+  await expect(slider).toHaveValue("-100");
+  await expect(page).toHaveURL(/scenario=-100/);
+  for (const cell of await table.locator("tbody tr td:last-child").allTextContents()) expect(cell).toBe("$0");
+  await page.reload();
+  await expect(slider).toHaveValue("-100");
+  await page.getByRole("button", {name: "Reset to +12%"}).click();
+  await expect(slider).toHaveValue("12");
+  expect(page.url()).not.toContain("scenario=");
+  await page.goto("./#/dashboards/insights?scenario=not-a-number");
+  await expect(slider).toHaveValue("12");
+});
+
+test("keyboard report search opens the collections ledger and respects an open record", async ({page}) => {
+  await page.goto("./");
+  await page.keyboard.press("Control+k");
+  const finder = page.getByRole("combobox", {name: "Find by name or topic"});
+  await finder.fill("invoice overdue");
+  await expect(page.getByRole("option", {name: "Past-due invoices"})).toHaveAttribute("aria-selected", "true");
+  await finder.press("Enter");
+  const ledger = page.getByRole("region", {name: "Outstanding invoices", exact: true});
+  await expect(ledger.getByLabel("Invoice age")).toHaveValue("past-due");
+  await expect(ledger).toBeInViewport();
+  await ledger.locator("tbody button").first().click();
+  await page.keyboard.press("Control+k");
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(page.getByRole("combobox", {name: "Find by name or topic"})).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await page.keyboard.press("Control+k");
+  await finder.fill("revenue");
+  await finder.press("ArrowDown");
+  await expect(page.getByRole("listbox", {name: "Matching dashboards and reports"}).getByRole("option", {selected: true})).toHaveText("Analytics");
+  await finder.fill("what if");
+  await finder.press("Enter");
+  await expect(page.getByRole("slider", {name: "Change from booked revenue"})).toBeInViewport();
+});
+
+test("a failed sample response can be retried without reloading the application", async ({page}) => {
+  let valid = false;
+  await page.route("**/demo/finance-invoices.json", async (route) => {
+    if (valid) await route.continue();
+    else await route.fulfill({status: 200, contentType: "application/json", body: JSON.stringify({message: "temporary response"})});
+  });
+  await page.goto("./#/dashboards/finance?ledger=invoices");
+  await expect(page.getByRole("alert")).toContainText("The report could not be read");
+  valid = true;
+  await page.getByRole("button", {name: "Retry", exact: true}).click();
+  await expect(page.getByRole("heading", {name: "Outstanding invoices"})).toBeVisible();
+});
+
+test("clicking an aging bar opens its invoices and the overdue metric opens all past-due bands", async ({page, request}) => {
+  const report = await (await request.get("./demo/finance-invoices.json")).json();
+  const expected = report.table.rows.filter((r: {aging: string}) => r.aging === "31-60");
+  await page.goto("./#/dashboards/finance");
+  const chart = page.getByRole("heading", {name:"Outstanding balance by age"}).locator("../..");
+  await chart.locator(".recharts-bar-rectangle path").nth(2).click();
+  const ledger = page.getByRole("region", {name: "Outstanding invoices", exact: true});
+  await expect(ledger.getByLabel("Invoice age")).toHaveValue("31-60");
+  await expect(ledger.locator("tbody tr")).toHaveCount(expected.length);
+  await page.getByRole("button", {name: "Review past-due invoices"}).click();
+  await expect(ledger.getByLabel("Invoice age")).toHaveValue("past-due");
+});
+
+test("a long saved-view name and its remove button stay usable on a narrow phone", async ({page}) => {
+  await page.setViewportSize({width: 320, height: 720});
+  await page.goto("./#/dashboards/finance?ledger=invoices");
+  await page.getByRole("button", {name:"Save view", exact:true}).click();
+  const name = "W".repeat(40);
+  await page.getByLabel("View name").fill(name);
+  await page.getByRole("button", {name:"Save report view",exact:true}).click();
+  const remove = page.getByRole("button", {name:"Remove saved view " + name});
+  const box = await remove.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+  await remove.click();
+  await expect(remove).toHaveCount(0);
+});
+
+test("export refuses a ledger that repeats a record on a later page", async ({page}) => {
+  await page.route("**/demo/finance-invoices.json", async route => {
+    const response = await route.fetch();
+    const report = await response.json();
+    const original = report.table.rows[0];
+    report.table.rows = Array.from({length: 55}, (_, i) => ({...original, id: "invoice-" + (i === 53 ? 2 : i), invoiceNumber: "INV-" + i}));
+    await route.fulfill({response, json:report});
+  });
+  let downloads = 0;
+  page.on("download", () => downloads++);
+  await page.goto("./#/dashboards/finance?ledger=invoices");
+  await page.getByRole("button", {name: "Export CSV", exact: true}).click();
+  await expect(page.getByText("The records changed while loading. Please try again.")).toBeVisible();
+  expect(downloads).toBe(0);
+});
+
+test("unknown historical period links show the all-time report without a comparison", async ({page}) => {
+  await page.goto("./#/dashboards/analytics?period=all");
+  await expect(page.getByRole("button", {name:"All time",exact:true})).toHaveAttribute("aria-pressed","true");
+  await expect(page.getByText("All recorded orders", {exact:true})).toBeVisible();
+  await expect(page.getByText(/vs previous period/)).toHaveCount(0);
+});

@@ -10,7 +10,8 @@ export function analyticsWindow(period: unknown, now = new Date()) {
 }
 
 type Order = { createdAt: Date; totalCents: number; status: string; channel: string };
-const isBooked = (order: Order) => ["paid", "shipped"].includes(order.status);
+export const bookedOrderStatuses = ["paid", "shipped"];
+const isBooked = (order: Order) => bookedOrderStatuses.includes(order.status);
 
 function totals(orders: Order[]) {
   const booked = orders.filter(isBooked);

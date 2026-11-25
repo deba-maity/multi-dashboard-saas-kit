@@ -13,11 +13,11 @@ function TaskLane({ status, scope, search, onOpen }: BoardProps & { status: Task
   const { data, error, fetchNextPage, hasNextPage, isFetchingNextPage, refetch } = useInfiniteQuery({
     queryKey: ["dashboard", "projects", scope, "board", status, search],
     initialPageParam: 1,
-    queryFn: async ({ pageParam }) => {
+    queryFn: async ({ pageParam, signal }) => {
       const params = new URLSearchParams({ page: String(pageParam), pageSize: "6", status, search });
-      if (!isDemo) return api<{ rows: Row[]; pagination: ApiPagination }>("/tasks?" + params);
+      if (!isDemo) return api<{ rows: Row[]; pagination: ApiPagination }>("/tasks?" + params, {signal});
       params.set("sort", "dueDate");
-      return (await loadReport("projects", params)).table;
+      return (await loadReport("projects", params, signal)).table;
     },
     getNextPageParam: ({ pagination }) => pagination.page < pagination.pageCount ? pagination.page + 1 : undefined
   });

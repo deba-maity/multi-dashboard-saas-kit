@@ -1,4 +1,9 @@
 import { Router } from "express";
+import { ledgerDashboards } from "@saas-kit/shared";
+import { getFinanceLedger } from "../services/financeReport.js";
+import { getInventoryLedger } from "../services/inventoryLedger.js";
+import { getMonitoringLedger } from "../services/monitoring.js";
+import { utcDay } from "../services/receivables.js";
 import { z } from "zod";
 import { requireAuth } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
@@ -35,4 +40,21 @@ dashboardRouter.get("/:dashboard", validate(dashboardSchema), async (req, res, n
   } catch (error) {
     next(error);
   }
+});
+
+const ledgerSchema = dashboardSchema.extend({ params: z.object({dashboard: z.enum(ledgerDashboards)}) });
+type LedgerId = (typeof ledgerDashboards)[number];
+
+dashboardRouter.get("/:dashboard/records", validate(ledgerSchema), async (req, res, next) => {
+  try {
+    const dashboard = req.params.dashboard as LedgerId;
+    const org = req.auth!.organizationId;
+    if (dashboard === "finance") {
+      const today = utcDay(new Date());
+      res.json({ table: await getFinanceLedger(org, req.query, today), periodLabel: today.toISOString().slice(0, 10) });
+    } else {
+      const ledger = dashboard === "inventory" ? getInventoryLedger : getMonitoringLedger;
+      res.json({ table: await ledger(org, req.query) });
+    }
+  } catch (error) { next(error); }
 });

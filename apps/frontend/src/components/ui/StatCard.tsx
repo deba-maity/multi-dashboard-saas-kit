@@ -1,4 +1,4 @@
-import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, ChevronRight } from "lucide-react";
 import { clsx } from "clsx";
 import type { DashboardMetric } from "@saas-kit/shared";
 import { compact, currency } from "../../lib/format";
@@ -17,16 +17,20 @@ const formatValue = (metric: DashboardMetric) => {
   return metric.value;
 };
 
-export function StatCard({ metric }: { metric: DashboardMetric }) {
+export function StatCard({ metric, onDrill }: { metric: DashboardMetric; onDrill?: () => void }) {
+  const Card = onDrill ? "button" : "div";
   const positive = Number(metric.change ?? 0) >= 0;
   return (
-    <div className="min-w-0 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+    <Card onClick={onDrill} aria-label={onDrill ? metric.drill?.label : undefined}
+      className={clsx("min-w-0 rounded-xl border border-zinc-200 bg-white p-4 text-left shadow-sm dark:border-zinc-800 dark:bg-zinc-950",
+        onDrill && "group hover:border-emerald-600 focus-visible:border-emerald-600 dark:hover:border-emerald-400")}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{metric.label}</p>
           <p className="mt-2 break-words text-xl tabular-nums sm:text-2xl font-bold text-zinc-950 dark:text-white">{formatValue(metric)}</p>
         </div>
-        <span className={clsx("h-7 w-1 shrink-0 rounded-full", toneClasses[metric.tone ?? "sky"])} />
+        {onDrill ? <ChevronRight aria-hidden="true" size={17} className="shrink-0 text-zinc-500 group-hover:text-emerald-700 dark:group-hover:text-emerald-400" /> :
+          <span className={clsx("h-7 w-1 shrink-0 rounded-full", toneClasses[metric.tone ?? "sky"])} />}
       </div>
       {metric.change !== undefined ? (
         <div className={clsx("mt-4 inline-flex items-center gap-1 text-sm font-semibold", positive ? "text-emerald-600" : "text-rose-600")}>
@@ -34,6 +38,6 @@ export function StatCard({ metric }: { metric: DashboardMetric }) {
           {positive && metric.change !== 0 ? "+" : ""}{metric.change}%
         </div>
       ) : null}
-    </div>
+    </Card>
   );
 }

@@ -16,21 +16,24 @@ async function exportDemo() {
     where: { slug: "northstar-labs" }
   });
   await mkdir(target, { recursive: true });
-  const snapshots = dashboardIds.map((id) => ({ id, period: "" }));
-  snapshots.push({ id: "analytics", period: "30" }, { id: "analytics", period: "90" });
-  for (const { id, period } of snapshots) {
+  const only = process.argv[2];
+  if (only && !dashboardIds.some((id) => id === only)) throw new Error("Unknown dashboard: " + only);
+  const snapshots = dashboardIds.map((id) => ({ id, period: "", ledger: "" }));
+  snapshots.push({ id: "analytics", period: "30", ledger: "" }, { id: "analytics", period: "90", ledger: "" },
+    { id: "finance", period: "", ledger: "invoices" });
+  for (const { id, period, ledger } of snapshots.filter((item) => !only || item.id === only)) {
     const pageSize = 50;
-    const result = await getDashboardData(id, organization.id, { page: 1, pageSize, period });
-    const keys = ["id", ...result.table.columns.map(({ key }) => key)];
+    const result = await getDashboardData(id, organization.id, { page: 1, pageSize, period, ledger });
+    const keys = new Set(["id", ...result.table.columns.map(({ key }) => key), ...result.filters.map(({ key }) => key)]);
     const rows: Array<Record<string, unknown>> = [];
     for (let page = 1; page <= result.table.pagination.pageCount; page++) {
-      const current = page === 1 ? result : await getDashboardData(id, organization.id, { page, pageSize, period });
+      const current = page === 1 ? result : await getDashboardData(id, organization.id, { page, pageSize, period, ledger });
       for (const row of current.table.rows) {
         const fields = row as Record<string, unknown>;
-        rows.push(Object.fromEntries(keys.map((key) => [key, fields[key]])));
+        rows.push(Object.fromEntries(Array.from(keys, (key) => [key, fields[key]])));
       }
     }
-    await writeFile(new URL((period ? id + "-" + period : id) + ".json", target), JSON.stringify({
+    await writeFile(new URL([id, period || ledger].filter(Boolean).join("-") + ".json", target), JSON.stringify({
       ...result,
       table: { ...result.table, rows, pagination: { page: 1, pageSize: Math.max(rows.length, 1), pageCount: 1, total: rows.length } }
     }) + "\n");

@@ -35,3 +35,8 @@ export const pagination = (page: number, pageSize: number, total: number) => ({
   total,
   pageCount: Math.max(Math.ceil(total / pageSize), 1)
 });
+
+export function reportOrder<T>(sort: unknown, columns: Record<string, T>, fallback: T, tie: T): T[] {
+  const key = String(sort ?? "");
+  return [Object.hasOwn(columns, key) ? columns[key] : fallback, tie];
+}

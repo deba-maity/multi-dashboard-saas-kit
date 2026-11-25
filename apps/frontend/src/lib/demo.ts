@@ -1,18 +1,23 @@
 import { readBrowserRecord, writeBrowserRecord, withBrowserLock } from "./browser-records";
+import { readReport } from "./report-response";
 import { ApiError } from "./api";
-import { projectSummary, reportSearchFields, taskStatuses, type DashboardId, type DashboardResponse, type TaskStatus } from "@saas-kit/shared";
+import { monitoringSummary, projectSummary, reportSearchFields, taskStatuses, type DashboardId, type DashboardResponse, type TaskStatus } from "@saas-kit/shared";
 
 export const isDemo = import.meta.env.MODE === "pages-demo";
 
 const snapshots = new Map<string, Promise<DashboardResponse>>();
-function snapshot(id: DashboardId, period?: string | null): Promise<DashboardResponse> {
-  const name = id === "analytics" && (period === "30" || period === "90") ? id + "-" + period : id;
+function snapshot(id: DashboardId, period?: string | null, ledger?: string | null): Promise<DashboardResponse> {
+  let name: string = id;
+  if (id === "analytics" && (period === "30" || period === "90")) name += "-" + period;
+  if (id === "finance" && ledger === "invoices") name += "-invoices";
   const cached = snapshots.get(name);
   if (cached) return cached;
   const pending = fetch(import.meta.env.BASE_URL + "demo/" + name + ".json")
     .then((response) => {
-      if (!response.ok) throw new Error("Unable to load the sample data. Try refreshing.");
-      return response.json() as Promise<DashboardResponse>;
+      if (!response.ok) throw new ApiError(response.status, "Unable to load the sample data. Please retry.");
+      return response.json().then((value: unknown) => readReport(id, value), () => {
+        throw new ApiError(502, "The report could not be read. Please retry.");
+      });
     })
     .catch((error) => { snapshots.delete(name); throw error; });
   snapshots.set(name, pending);
@@ -53,7 +58,7 @@ export async function resetDemoTasks() {
 
 export async function loadDemoDashboard(id: DashboardId, query: string): Promise<DashboardResponse> {
   const params = new URLSearchParams(query);
-  const original = await snapshot(id, params.get("period"));
+  const original = await snapshot(id, params.get("period"), params.get("ledger"));
   const data = { ...original, table: { ...original.table } };
   if (id === "projects") {
     const tasks = data.table.rows.map((row) => ({
@@ -62,13 +67,29 @@ export async function loadDemoDashboard(id: DashboardId, query: string): Promise
     data.table.rows = tasks;
     Object.assign(data, projectSummary(tasks));
   }
+  const service = params.get("service");
+  if (id === "monitoring" && service) {
+    const events = original.table.rows.filter((row) => row.service === service);
+    const latency = events.map((row) => Number(row.latencyMs)).sort((a, b) => a - b);
+    const { levels, ...overview } = monitoringSummary({
+      total: events.length, errors: events.filter((row) => row.level === "error").length,
+      warnings: events.filter((row) => row.level === "warn").length, info: events.filter((row) => row.level === "info").length,
+      p95: latency[Math.ceil(latency.length * .95) - 1] ?? null
+    }, events.length ? 1 : 0, service);
+    Object.assign(data, overview);
+    data.charts = [levels, ...original.charts.filter((chart) => chart.filterKey !== "level")];
+    data.filters = original.filters.map((filter) => filter.key === "service" && !filter.options.some((option) => option.value === service)
+      ? { ...filter, options: [...filter.options, { label: service, value: service }] } : filter);
+  }
   const search = (params.get("search") ?? "").trim().toLowerCase();
   const pageSize = Math.min(50, Math.max(1, Number(params.get("pageSize")) || 10));
   const rows = data.table.rows.filter((row) =>
-    data.filters.every(({ key }) => {
+    data.filters.every(({ key, options }) => {
       const value = params.get(key);
-      return !value || value === "all" || String(row[key]).toLowerCase() === value.toLowerCase();
-    }) && (!search || reportSearchFields[id].some((key) =>
+      if (!value || value === options[0]?.value) return true;
+      if (id === "finance" && key === "aging" && value === "past-due") return Number(row.daysPastDue) > 0;
+      return key === "service" ? row[key] === value : String(row[key]).toLowerCase() === value.toLowerCase();
+    }) && (!search || (data.table.searchFields ?? reportSearchFields[id]).some((key) =>
       String(row[key] ?? "").toLowerCase().includes(search)
     ))
   );

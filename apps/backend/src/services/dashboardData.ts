@@ -1,9 +1,12 @@
+import { getInventoryLedger } from "./inventoryLedger.js";
+import { getMonitoringData } from "./monitoring.js";
+import { getFinanceReport } from "./financeReport.js";
 import { getTaskPage } from "./taskPage.js";
-import type { Prisma } from "@prisma/client";
-import { analyticsWindow, orderSummary } from "./orderSummary.js";
-import { projectSummary } from "@saas-kit/shared";
+import { Prisma } from "@prisma/client";
+import { analyticsWindow, bookedOrderStatuses, orderSummary } from "./orderSummary.js";
+import { defaultScenarioChange, projectSummary, scenarioCents } from "@saas-kit/shared";
 import { prisma } from "../config/prisma.js";
-import { centsToCurrency, containsText, pageArgs, pagination } from "../utils/http.js";
+import { centsToCurrency, containsText, pageArgs, pagination, reportOrder } from "../utils/http.js";
 
 type DashboardId =
   | "analytics"
@@ -68,10 +71,6 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
     organizationId, ...(status ? { status } : {}),
     ...(q ? { OR: [{ customerName: match }, { channel: match }, { status: match }] } : {})
   };
-  function tableOrder<T>(columns: Record<string, T>, fallback: T, tie: T): T[] {
-    const key = String(query.sort ?? "");
-    return [Object.hasOwn(columns, key) ? columns[key] : fallback, tie];
-  }
   switch (dashboard) {
     case "analytics": {
       const window = analyticsWindow(query.period);
@@ -83,7 +82,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           orderBy: { createdAt: "asc" }
         }),
         prisma.order.count({ where: filtered }),
-        prisma.order.findMany({ where: filtered, orderBy: tableOrder<Prisma.OrderOrderByWithRelationInput>({
+        prisma.order.findMany({ where: filtered, orderBy: reportOrder<Prisma.OrderOrderByWithRelationInput>(query.sort, {
           customerName: { customerName: direction }, channel: { channel: direction }, status: { status: direction },
           total: { totalCents: direction }, createdAt: { createdAt: direction }
         }, { createdAt: "desc" }, { id: "asc" }), skip, take })
@@ -112,7 +111,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
       const where = orderWhere;
       const [orders, rows, total, products] = await Promise.all([
         prisma.order.findMany({ where: { organizationId }, orderBy: { createdAt: "asc" } }),
-        prisma.order.findMany({ where, include: { items: true }, orderBy: tableOrder<Prisma.OrderOrderByWithRelationInput>({
+        prisma.order.findMany({ where, include: { items: true }, orderBy: reportOrder<Prisma.OrderOrderByWithRelationInput>(query.sort, {
           customerName: { customerName: direction },
           channel: { channel: direction },
           status: { status: direction },
@@ -164,7 +163,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
       };
       const [members, rows, total] = await Promise.all([
         prisma.organizationMember.findMany({ where: { organizationId }, select: { role: true, user: { select: { status: true } } } }),
-        prisma.organizationMember.findMany({ where, select: { role: true, user: { select: { id: true, name: true, email: true, status: true, lastActiveAt: true } } }, orderBy: tableOrder<Prisma.OrganizationMemberOrderByWithRelationInput>({
+        prisma.organizationMember.findMany({ where, select: { role: true, user: { select: { id: true, name: true, email: true, status: true, lastActiveAt: true } } }, orderBy: reportOrder<Prisma.OrganizationMemberOrderByWithRelationInput>(query.sort, {
           name: { user: { name: direction } },
           email: { user: { email: direction } },
           role: { role: direction },
@@ -208,77 +207,17 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         ]
       };
     }
-    case "finance": {
-      const where = { organizationId, ...(status ? { status } : {}), ...(q ? { OR: [{ description: match }, { type: match }, { status: match }] } : {}) };
-      const [transactions, rows, total, invoices] = await Promise.all([
-        prisma.transaction.findMany({ where: { organizationId }, orderBy: { occurredAt: "asc" } }),
-        prisma.transaction.findMany({ where, orderBy: tableOrder<Prisma.TransactionOrderByWithRelationInput>({
-          description: { description: direction },
-          type: { type: direction },
-          status: { status: direction },
-          amount: { amountCents: direction },
-          occurredAt: { occurredAt: direction }
-        }, { occurredAt: "desc" }, { id: "asc" }), skip, take }),
-        prisma.transaction.count({ where }),
-        prisma.invoice.findMany({ where: { organizationId } })
-      ]);
-      return {
-        id: dashboard,
-        title: "Finance & Billing",
-        description: "Payment history, invoice aging, recurring revenue, and collection state.",
-        metrics: [
-          { label: "Settled cashflow", value: centsToCurrency(sum(transactions.filter((t) => t.status === "paid"), (t) => t.amountCents)), format: "currency", tone: "emerald" },
-          { label: "Paid invoices", value: invoices.filter((i) => i.status === "paid").length, tone: "sky" },
-          { label: "Overdue", value: invoices.filter((i) => i.status === "overdue").length, tone: "rose" },
-          { label: "Pending amount", value: centsToCurrency(sum(transactions.filter((t) => t.status === "pending"), (t) => t.amountCents)), format: "currency", tone: "amber" }
-        ],
-        charts: [
-          { name: "Settled cashflow", unit: "USD", type: "line", xKey: "month", yKeys: ["revenue"], data: timeSeries(transactions.filter((t) => t.status === "paid").map((t) => ({ date: t.occurredAt, cents: t.amountCents }))) },
-          { name: "Invoice aging", type: "bar", xKey: "status", yKeys: ["count"], data: ["paid", "open", "overdue"].map((s) => ({ status: s, count: invoices.filter((i) => i.status === s).length })) }
-        ],
-        table: {
-          title: "Transaction ledger",
-          columns: [
-            { key: "description", label: "Description" },
-            { key: "type", label: "Type" },
-            { key: "status", label: "Status", type: "status" },
-            { key: "amount", label: "Amount", type: "currency" },
-            { key: "occurredAt", label: "Date", type: "date" }
-          ],
-          rows: rows.map((t) => ({ ...t, amount: centsToCurrency(t.amountCents) })),
-          pagination: pagination(page, pageSize, total)
-        },
-        filters: [
-          { key: "status", label: "Payment status", options: ["all", "paid", "open", "pending", "failed"].map((v) => ({ label: v, value: v })) }
-        ],
-        widgets: [
-          { title: "Unpaid invoices", value: String(invoices.filter((i) => i.status !== "paid").length), detail: "Open and overdue invoices." },
-          { title: "Failed payments", value: String(transactions.filter((t) => t.status === "failed").length), detail: "Failed transactions in the ledger." }
-        ]
-      };
-    }
+    case "finance": return getFinanceReport(organizationId, query);
     case "inventory": {
       const reorderPoint = prisma.inventoryItem.fields.reorderPoint;
-      const stock = status === "low" ? { lte: reorderPoint } : status === "healthy" ? { gt: reorderPoint } : undefined;
-      const where = {
-        organizationId, stock,
-        ...(q ? { OR: [{ product: { name: match } }, { product: { sku: match } }, { warehouse: match }] } : {})
-      };
       const lowStock = { organizationId, stock: { lte: reorderPoint } };
-      const [warehouses, suppliers, lowCount, preview, rows, total] = await Promise.all([
+      const [warehouses, suppliers, lowCount, preview, table] = await Promise.all([
         prisma.inventoryItem.groupBy({ by: ["warehouse"], where: { organizationId }, _count: { _all: true }, _sum: { stock: true } }),
         prisma.inventoryItem.groupBy({ by: ["supplier"], where: { organizationId } }),
         prisma.inventoryItem.count({ where: lowStock }),
         prisma.inventoryItem.findMany({ where: lowStock, orderBy: [{ stock: "asc" }, { id: "asc" }], take: 5,
           select: { product: { select: { sku: true } } } }),
-        prisma.inventoryItem.findMany({ where, include: { product: true }, orderBy: tableOrder<Prisma.InventoryItemOrderByWithRelationInput>({
-          product: { product: { name: direction } },
-          sku: { product: { sku: direction } },
-          warehouse: { warehouse: direction },
-          stock: { stock: direction },
-          reorderPoint: { reorderPoint: direction }
-        }, { stock: "asc" }, { id: "asc" }), skip, take }),
-        prisma.inventoryItem.count({ where })
+        getInventoryLedger(organizationId, query)
       ]);
       const itemCount = sum(warehouses, (row) => row._count._all);
       const units = sum(warehouses, (row) => row._sum.stock ?? 0);
@@ -298,19 +237,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           { name: "Stock by warehouse", type: "bar", xKey: "warehouse", yKeys: ["stock"], data: warehouses.sort((a, b) => a.warehouse.localeCompare(b.warehouse)).map((row) => ({ warehouse: row.warehouse, stock: row._sum.stock ?? 0 })) },
           { name: "Reorder risk", filterKey: "status", type: "bar", xKey: "status", yKeys: ["count"], data: [{ status: "Low", count: lowCount }, { status: "Healthy", count: itemCount - lowCount }] }
         ],
-        table: {
-          title: "Stock ledger",
-          columns: [
-            { key: "product", label: "Product" },
-            { key: "sku", label: "SKU" },
-            { key: "warehouse", label: "Warehouse" },
-            { key: "stock", label: "Stock", type: "number" },
-            { key: "reorderPoint", label: "Reorder at", type: "number" },
-            { key: "status", label: "Stock health", type: "status", sortable: false }
-          ],
-          rows: rows.map((i) => ({ id: i.id, product: i.product.name, sku: i.product.sku, warehouse: i.warehouse, stock: i.stock, reorderPoint: i.reorderPoint, status: i.stock <= i.reorderPoint ? "low" : "healthy" })),
-          pagination: pagination(page, pageSize, total)
-        },
+        table,
         filters: [{ key: "status", label: "Stock health", options: [{ label: "All", value: "all" }, { label: "Low", value: "low" }, { label: "Healthy", value: "healthy" }] }],
         widgets: [
           { title: "Reorder list", value: lowCount + " SKUs", detail: reorderDetail || "All stocked above reorder point." },
@@ -321,7 +248,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
     case "projects": {
       const [tasks, taskPage] = await Promise.all([
         prisma.task.findMany({ where: { organizationId }, select: { status: true, priority: true } }),
-        getTaskPage(organizationId, q, status, page, pageSize, tableOrder<Prisma.TaskOrderByWithRelationInput>({
+        getTaskPage(organizationId, q, status, page, pageSize, reportOrder<Prisma.TaskOrderByWithRelationInput>(query.sort, {
           title: { title: direction },
           project: { project: direction },
           assignee: { assignee: { name: direction } },
@@ -357,7 +284,7 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
       const where = { organizationId, ...(channel ? { channel } : {}), ...(q ? { OR: [{ name: match }, { channel: match }] } : {}) };
       const [campaigns, rows, total] = await Promise.all([
         prisma.campaign.findMany({ where: { organizationId } }),
-        prisma.campaign.findMany({ where, orderBy: tableOrder<Prisma.CampaignOrderByWithRelationInput>({
+        prisma.campaign.findMany({ where, orderBy: reportOrder<Prisma.CampaignOrderByWithRelationInput>(query.sort, {
           name: { name: direction },
           channel: { channel: direction },
           clicks: { clicks: direction },
@@ -400,64 +327,14 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
         ]
       };
     }
-    case "monitoring": {
-      const level = statusFilter(query.level ?? query.status);
-      const where = { organizationId, ...(level ? { level } : {}), ...(q ? { OR: [{ message: match }, { service: match }] } : {}) };
-      const [logs, rows, total] = await Promise.all([
-        prisma.systemLog.findMany({ where: { organizationId } }),
-        prisma.systemLog.findMany({ where, orderBy: tableOrder<Prisma.SystemLogOrderByWithRelationInput>({
-          level: { level: direction },
-          service: { service: direction },
-          message: { message: direction },
-          latencyMs: { latencyMs: direction },
-          createdAt: { createdAt: direction }
-        }, { createdAt: "desc" }, { id: "asc" }), skip, take }),
-        prisma.systemLog.count({ where })
-      ]);
-      const latencies = logs.map((log) => log.latencyMs).sort((a, b) => a - b);
-      const p95 = latencies[Math.ceil(latencies.length * 0.95) - 1];
-      return {
-        id: dashboard,
-        title: "System Monitoring",
-        description: "Service health, logs, latency, error trends, and incident signals.",
-        metrics: [
-          { label: "Log events", value: logs.length, tone: "emerald" },
-          { label: "Errors", value: logs.filter((l) => l.level === "error").length, tone: "rose" },
-          { label: "P95 latency", value: p95 === undefined ? "—" : p95 + " ms", tone: "sky" },
-          { label: "Services", value: new Set(logs.map((l) => l.service)).size, tone: "violet" }
-        ],
-        charts: [
-          { name: "Log levels", filterKey: "level", type: "bar", xKey: "level", yKeys: ["count"], data: ["info", "warn", "error"].map((l) => ({ level: l, count: logs.filter((x) => x.level === l).length })) },
-          { name: "Latency by service", unit: "ms", type: "bar", xKey: "service", yKeys: ["latency"], data: categories(logs, (log) => log.service).map((service) => ({ service, latency: Math.round(sum(logs.filter((l) => l.service === service), (l) => l.latencyMs) / Math.max(logs.filter((l) => l.service === service).length, 1)) })) }
-        ],
-        table: {
-          title: "Event log",
-          columns: [
-            { key: "level", label: "Level", type: "status" },
-            { key: "service", label: "Service" },
-            { key: "message", label: "Message" },
-            { key: "latencyMs", label: "Latency (ms)", type: "number" },
-            { key: "createdAt", label: "Time", type: "datetime" }
-          ],
-          rows,
-          pagination: pagination(page, pageSize, total)
-        },
-        filters: [
-          { key: "level", label: "Level", options: ["all", "info", "warn", "error"].map((v) => ({ label: v, value: v })) }
-        ],
-        widgets: [
-          { title: "Error share", value: percent(logs.filter((l) => l.level === "error").length, logs.length) + "%", detail: "Error events as a share of recorded logs." },
-          { title: "Latency sample", value: String(logs.length) + " events", detail: "P95 uses the nearest-rank percentile across recorded event latencies." }
-        ]
-      };
-    }
+    case "monitoring": return getMonitoringData(organizationId, query);
     case "crm": {
       const stage = statusFilter(query.stage ?? query.status);
       const where = { organizationId, ...(stage ? { stage } : {}), ...(q ? { OR: [{ company: match }, { name: match }, { source: match }] } : {}) };
       const [leads, contacts, rows, total] = await Promise.all([
         prisma.lead.findMany({ where: { organizationId } }),
         prisma.contact.count({ where: { organizationId } }),
-        prisma.lead.findMany({ where, orderBy: tableOrder<Prisma.LeadOrderByWithRelationInput>({
+        prisma.lead.findMany({ where, orderBy: reportOrder<Prisma.LeadOrderByWithRelationInput>(query.sort, {
           name: { name: direction },
           company: { company: direction },
           source: { source: direction },
@@ -504,9 +381,9 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
     case "insights": {
       const category = statusFilter(query.category ?? query.status);
       const where = { organizationId, ...(category ? { category } : {}), ...(q ? { OR: [{ title: match }, { summary: match }, { category: match }] } : {}) };
-      const [insights, rows, total, orders] = await Promise.all([
+      const [insights, rows, total, recentOrders, months] = await Promise.all([
         prisma.insight.findMany({ where: { organizationId } }),
-        prisma.insight.findMany({ where, orderBy: tableOrder<Prisma.InsightOrderByWithRelationInput>({
+        prisma.insight.findMany({ where, orderBy: reportOrder<Prisma.InsightOrderByWithRelationInput>(query.sort, {
           category: { category: direction },
           title: { title: direction },
           summary: { summary: direction },
@@ -514,24 +391,30 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           confidence: { confidence: direction }
         }, { impactScore: "desc" }, { id: "asc" }), skip, take }),
         prisma.insight.count({ where }),
-        prisma.order.findMany({ where: { organizationId }, orderBy: { createdAt: "asc" } })
+        prisma.order.findMany({ where: { organizationId }, select: {totalCents: true}, orderBy: [{createdAt: "desc"}, {id: "asc"}], take: 8 }),
+        prisma.$queryRaw<Array<{ month: Date; cents: bigint }>>`
+          SELECT date_trunc('month', "createdAt") AS month,
+            coalesce(sum("totalCents") FILTER (WHERE status IN (${Prisma.join(bookedOrderStatuses)})), 0) AS cents
+          FROM "Order" WHERE "organizationId" = ${organizationId} GROUP BY 1 ORDER BY 1`
       ]);
       return {
         id: dashboard,
         title: "AI Insights",
-        description: "Sample recommendations and a scenario showing monthly order value with a 12% uplift.",
+        description: "Review recommendation scores and explore how a change in booked revenue would affect each month.",
         metrics: [
           { label: "Recommendations", value: insights.length, tone: "violet" },
           { label: "Avg confidence", value: `${Math.round(sum(insights, (i) => i.confidence) / Math.max(insights.length, 1))}%`, tone: "emerald" },
           { label: "Impact score", value: Math.round(sum(insights, (i) => i.impactScore) / Math.max(insights.length, 1)), tone: "sky" },
-          { label: "Last 8 orders", value: centsToCurrency(sum(orders.slice(-8), (o) => o.totalCents)), format: "currency", tone: "amber" }
+          { label: "Last 8 orders", value: centsToCurrency(sum(recentOrders, (o) => o.totalCents)), format: "currency", tone: "amber" }
         ],
         charts: [
           { name: "Insight impact", filterKey: "category", type: "bar", xKey: "category", yKeys: ["impact"], data: ["Revenue", "Retention", "Risk", "Ops"].map((category) => ({ category, impact: Math.round(sum(insights.filter((i) => i.category === category), (i) => i.impactScore) / Math.max(insights.filter((i) => i.category === category).length, 1)) })) },
-          { name: "Revenue scenario (+12%)", unit: "USD", type: "line", xKey: "month", yKeys: ["revenue"], data: timeSeries(orders.map((o) => ({ date: o.createdAt, cents: o.totalCents }))).map((row) => ({ ...row, revenue: Math.round(Number(row.revenue) * 1.12) })) }
+          { name: "Booked revenue scenario", kind: "booked-revenue-scenario", unit: "USD", type: "line", xKey: "month", yKeys: ["booked", "scenario"],
+            data: months.map(({ month, cents }) => ({ month: month.toLocaleString("en-US", { month: "short", year: "numeric", timeZone: "UTC" }),
+              booked: centsToCurrency(Number(cents)), scenario: centsToCurrency(scenarioCents(Number(cents), defaultScenarioChange)) })) }
         ],
         table: {
-          title: "Recommendation queue",
+          title: "Recommendation queue", recordKey: "title",
           columns: [
             { key: "category", label: "Category", type: "status" },
             { key: "title", label: "Recommendation" },
@@ -546,7 +429,6 @@ export const getDashboardData = async (dashboard: DashboardId, organizationId: s
           { key: "category", label: "Category", options: ["all", "Revenue", "Retention", "Risk", "Ops"].map((v) => ({ label: v, value: v })) }
         ],
         widgets: [
-          { title: "Scenario assumption", value: "+12%", detail: "Each historical month’s order value multiplied by 1.12." },
           { title: "Recommendation scores", value: "Stored ratings", detail: "Impact and confidence come from the saved recommendation records." }
         ]
       };

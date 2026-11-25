@@ -61,9 +61,9 @@ export function SavedViews({ dashboard, scope }: { dashboard: string; scope: str
   return <div className="flex flex-wrap items-center gap-2">
     <Button size="sm" variant="secondary" onClick={() => setDialog(true)}><Bookmark size={14} />Save view</Button>
     <Button size="sm" variant="secondary" onClick={copy}><Link2 size={14} />Copy link</Button>
-    {views.map((v) => <span key={v.name} className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
-      <button className="p-1" onClick={() => setParams(new URLSearchParams(v.query))}>{v.name}</button>
-      <button className="rounded-full p-1 hover:bg-emerald-100 dark:hover:bg-emerald-900" aria-label={"Remove saved view " + v.name}
+    {views.map((v) => <span key={v.name} className="inline-flex min-w-0 max-w-full items-center rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">
+      <button className="min-w-0 p-1 text-left [overflow-wrap:anywhere]" onClick={() => setParams(new URLSearchParams(v.query))}>{v.name}</button>
+      <button className="shrink-0 rounded-full p-1.5 hover:bg-emerald-100 dark:hover:bg-emerald-900" aria-label={"Remove saved view " + v.name}
         onClick={() => void update((list) => list.filter((item) => item.name !== v.name))}><X size={13} /></button>
     </span>)}
     <Modal open={dialog} title="Save report view" onClose={() => setDialog(false)}>
