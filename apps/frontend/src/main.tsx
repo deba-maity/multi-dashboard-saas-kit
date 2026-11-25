@@ -15,6 +15,7 @@ const Router = isDemo ? HashRouter : BrowserRouter;
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
+      networkMode: isDemo ? "always" : "online",
       refetchOnWindowFocus: !isDemo,
       staleTime: isDemo ? 0 : 15_000,
       retry: 1

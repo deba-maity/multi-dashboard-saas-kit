@@ -558,3 +558,24 @@ test("a saved dark theme is applied while the application bundle is still unavai
   await page.getByRole("button", {name: "Toggle theme"}).click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
 });
+
+test("sample records stay filterable and exportable after losing the connection", async ({page, context}) => {
+  await page.goto("./#/dashboards/finance?ledger=invoices");
+  const ledger = page.getByRole("region", {name: "Outstanding invoices", exact: true});
+  await expect(ledger.locator("tbody tr").first()).toBeVisible();
+  await context.setOffline(true);
+  try {
+    await ledger.getByLabel("Invoice age").selectOption("past-due");
+    await expect(ledger).toContainText("of 10 records");
+    const downloading = page.waitForEvent("download");
+    await ledger.getByRole("button", {name: "Export CSV", exact: true}).click();
+    const csv = await readFile((await (await downloading).path())!, "utf8");
+    expect(csv.trim().split(/\r?\n/)).toHaveLength(11);
+    await page.getByRole("link", {name: "Marketing", exact: true}).click();
+    await expect(page.getByRole("alert")).toContainText("Reconnect to load this sample report");
+  } finally {
+    await context.setOffline(false);
+  }
+  await page.getByRole("button", {name: "Retry", exact: true}).click();
+  await expect(page.getByRole("heading", {name: "Marketing Performance"})).toBeVisible();
+});

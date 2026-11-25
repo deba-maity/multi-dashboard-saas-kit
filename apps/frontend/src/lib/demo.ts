@@ -19,7 +19,13 @@ function snapshot(id: DashboardId, period?: string | null, ledger?: string | nul
         throw new ApiError(502, "The report could not be read. Please retry.");
       });
     })
-    .catch((error) => { snapshots.delete(name); throw error; });
+    .catch((error) => {
+      snapshots.delete(name);
+      if (error instanceof TypeError && !navigator.onLine) {
+        throw new ApiError(503, "Reconnect to load this sample report, then retry.");
+      }
+      throw error;
+    });
   snapshots.set(name, pending);
   return pending;
 }
