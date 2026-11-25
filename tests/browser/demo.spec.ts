@@ -542,3 +542,19 @@ test("long service names fit the phone filter and remain reachable beyond the ch
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(320);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
 });
+
+test("a saved dark theme is applied while the application bundle is still unavailable", async ({page}) => {
+  await page.goto("./");
+  await page.getByRole("button", {name: "Toggle theme"}).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  const scripts = "**/*";
+  await page.route(scripts, (route) => route.request().resourceType() === "script" ? route.abort() : route.continue());
+  await page.reload({waitUntil: "load"});
+  await expect(page.locator("#root")).toBeEmpty();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await expect(page.locator("html")).toHaveCSS("color-scheme", "dark");
+  await page.unroute(scripts);
+  await page.reload();
+  await page.getByRole("button", {name: "Toggle theme"}).click();
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+});
